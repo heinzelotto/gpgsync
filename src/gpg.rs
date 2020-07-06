@@ -1,6 +1,4 @@
-use gpgme::{
-    error::Result, Context, PassphraseRequest, PinentryMode, Protocol,
-};
+use gpgme::{error::Result, Context, PassphraseRequest, PinentryMode, Protocol};
 use std::{fs::File, io::Write};
 
 // todo make Read -> Write function
