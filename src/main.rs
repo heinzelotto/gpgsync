@@ -344,9 +344,13 @@ fn push_plain(
     plain_root: &std::path::PathBuf,
     gpg_root: &std::path::PathBuf,
 ) {
+    //    dbg!(&plain_root.join(fp));
     let mut plain_f = File::open(&plain_root.join(fp)).unwrap();
     let gpg_data = gpg::encrypt(&mut plain_f, passphrase.as_bytes()).unwrap();
 
+    //  dbg!(&add_gpg_extension(&gpg_root.join(&fp)));
+
+    //dbg!(&gpg_data);
     let mut gpg_f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
