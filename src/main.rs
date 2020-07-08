@@ -4,7 +4,7 @@ use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{self, DirEntry, File};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel; // todo crossbeam
                               // use std::str::from_utf8;
@@ -13,16 +13,37 @@ use structopt::StructOpt;
 
 mod gpg;
 
-type SyncDb = HashMap<std::path::PathBuf, (FileStatus, FileStatus)>;
+/// A sync entity represents up to two files by a relative path. It can exist unencrypted relative to the plain_root and
+/// encrypted (with .gpg extension) relative to the gpg_root.
+struct SyncEntity<'a> {
+    /// The relative path without .gpg extension
+    p: PathBuf,
+    // ?could be reference
+    plain_root: &'a PathBuf,
+    // ?could be reference
+    gpg_root: &'a PathBuf,
+}
+
+impl<'a> SyncEntity<'a> {
+    fn as_plain(&self) -> PathBuf {
+        self.plain_root.join(&self.p)
+    }
+
+    fn as_gpg(&self) -> PathBuf {
+        add_gpg_extension(&self.gpg_root.join(&self.p))
+    }
+}
+
+type SyncDb = HashMap<PathBuf, (FileStatus, FileStatus)>;
 
 #[derive(StructOpt)]
 struct Cli {
     /// The plaintext data path
     #[structopt(parse(from_os_str))]
-    plain_root: std::path::PathBuf, // plain_base_path
+    plain_root: PathBuf,
     /// The encrypted gpg path
     #[structopt(parse(from_os_str))]
-    gpg_root: std::path::PathBuf, // gpg_base_path
+    gpg_root: PathBuf,
     /// The passphrase
     passphrase: String,
 }
@@ -81,117 +102,41 @@ fn plain_file_hash(p: &Path) -> io::Result<Vec<u8>> {
 
 fn gpg_file_hash(p: &Path, passphrase: &str) -> io::Result<Vec<u8>> {
     let mut f = File::open(p)?;
-    // let mut buf: [u8; 1024] = [0; 1024];
-    // loop {
-    //     let n = f.read(&mut buf)?;
-    //     if n == 0 {
-    //         break;
-    //     }
 
-    //     hasher.update(&buf[0..n]);
-    // }
+    let mut decrypted = Vec::new();
 
-    let df = gpg::decrypt(&mut f, passphrase.as_bytes()).unwrap();
+    gpg::decrypt(&mut f, &mut decrypted, passphrase.as_bytes()).unwrap();
 
     //println!("{:?}", from_utf8(&df));
 
-    hash_all(&mut Cursor::new(df))
+    hash_all(&mut Cursor::new(decrypted))
 }
 
 /// just a partition of relative paths, without checking for conflicts
 #[derive(Debug)]
 struct GpgDirPathDiff<'a> {
-    plain_only: Vec<&'a std::path::PathBuf>,
-    gpg_only: Vec<&'a std::path::PathBuf>,
-    both: Vec<&'a std::path::PathBuf>,
+    plain_only: Vec<&'a PathBuf>,
+    gpg_only: Vec<&'a PathBuf>,
+    both: Vec<&'a PathBuf>,
 }
 
-fn compare_sets<'a>(
-    plain_paths: &'a HashSet<std::path::PathBuf>,
-    gpg_paths: &'a HashSet<std::path::PathBuf>,
-) -> GpgDirPathDiff<'a> {
-    let plain_only: Vec<&'a std::path::PathBuf> = plain_paths.difference(&gpg_paths).collect();
-    let gpg_only: Vec<&'a std::path::PathBuf> = gpg_paths.difference(&plain_paths).collect();
-    let both: Vec<&'a std::path::PathBuf> = plain_paths.intersection(&gpg_paths).collect();
+// #[derive(Debug)]
+// enum SyncHash {
+//     Agree(Vec<u8>),
+//     Conflict,
+// }
 
-    GpgDirPathDiff {
-        plain_only,
-        gpg_only,
-        both,
-    }
-
-    // println!("s1_only\n{:?}", &s1_only);
-    // println!("s2_only\n{:?}", &s2_only);
-    // println!("both\n{:?}", &both);
-
-    // let conflicts: Vec<&std::path::PathBuf> = both.iter().copied().map(|p| p).collect();
-    // if !conflicts.is_empty() {
-    //     for p in conflicts {
-    //         println!("{:#?} is out of sync", p);
-    //     }
-    //     return Err(anyhow!("Some files are out of sync"));
-    // }
-
-    // quit if some are out of sync
-
-    // s1_only encrypt to s2 (but outside this function, do only the analysis here)
-
-    // s2_only decrypt to s1. (at this point it will already have been decrypted,
-    // but we have to do it twice if we don't add temporary files)
-
-    //Ok(())
-}
-
-#[derive(Debug)]
-enum SyncHash {
-    Agree(Vec<u8>),
-    Conflict,
-}
-
-fn add_gpg_extension(p: &std::path::PathBuf) -> std::path::PathBuf {
+fn add_gpg_extension(p: &PathBuf) -> PathBuf {
     let mut name = p.file_name().unwrap().to_owned();
     name.push(".gpg");
     p.parent().unwrap().join(&name)
 }
 
-fn remove_gpg_extension(p: &Path) -> std::path::PathBuf {
+fn remove_gpg_extension(p: &Path) -> PathBuf {
     p.parent()
         .unwrap()
         .join(p.file_stem().unwrap())
         .to_path_buf()
-}
-
-fn check_duplicates<'a>(
-    args: &Cli,
-    duplicates: &'a Vec<&std::path::PathBuf>,
-) -> Result<HashMap<&'a std::path::PathBuf, SyncHash>> {
-    let mut m = HashMap::new();
-
-    duplicates
-        .iter()
-        .map(|de| {
-            let plain_path = dbg!(args.plain_root.join(&de));
-            let mut plain_f = File::open(&plain_path).unwrap();
-            let plain_hash = hash_all(&mut plain_f)?;
-
-            let gpg_path = dbg!(add_gpg_extension(&args.gpg_root.join(&de)));
-            let mut gpg_f = File::open(&gpg_path).unwrap();
-            let gpg_hash = hash_all(&mut Cursor::new(gpg::decrypt(
-                &mut gpg_f,
-                &args.passphrase.as_bytes(),
-            )?))?;
-
-            if plain_hash == gpg_hash {
-                m.insert(*de, SyncHash::Agree(plain_hash));
-            } else {
-                m.insert(*de, SyncHash::Conflict);
-            }
-
-            Ok(())
-        })
-        .collect::<Result<Vec<()>>>()?;
-
-    Ok(m)
 }
 
 // struct Revision(u64);
@@ -232,7 +177,7 @@ fn determine_sync_action(plain: FileChange, gpg: FileChange) -> SyncAction {
             SyncAction::PossibleConflict
         }
         (FileChange::NoChange(FileStatus::Existent(_)), FileChange::Mod) => SyncAction::PushGpg,
-        (FileChange::NoChange(FileStatus::Existent(_)), FileChange::Del) => SyncAction::DeleteGpg,
+        (FileChange::NoChange(FileStatus::Existent(_)), FileChange::Del) => SyncAction::DeletePlain,
         (FileChange::Add, FileChange::NoChange(FileStatus::Nonexistent)) => SyncAction::PushPlain,
         (FileChange::Add, FileChange::NoChange(FileStatus::Existent(_))) => {
             SyncAction::PossibleConflict
@@ -270,7 +215,7 @@ fn determine_file_change(prev: FileStatus, cur: FileStatus) -> FileChange {
     }
 }
 
-fn file_status(fp: &std::path::PathBuf) -> FileStatus {
+fn file_status(fp: &PathBuf) -> FileStatus {
     if !fp.exists() {
         return FileStatus::Nonexistent;
     }
@@ -279,28 +224,21 @@ fn file_status(fp: &std::path::PathBuf) -> FileStatus {
     FileStatus::Existent(mtime)
 }
 
-fn file_statuses(
-    rel_path_without_gpg: &std::path::PathBuf,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
-) -> (FileStatus, FileStatus) {
-    (
-        file_status(&plain_root.join(&rel_path_without_gpg)),
-        file_status(&add_gpg_extension(&gpg_root.join(&rel_path_without_gpg))),
-    )
+fn file_statuses(se: &SyncEntity) -> (FileStatus, FileStatus) {
+    (file_status(&se.as_plain()), file_status(&se.as_gpg()))
 }
 
-fn get_file_status_from_db(db: &mut SyncDb, fp: &std::path::PathBuf) -> (FileStatus, FileStatus) {
+fn get_file_status_from_db(db: &mut SyncDb, fp: &PathBuf) -> (FileStatus, FileStatus) {
     db.get(fp)
         .cloned()
         .unwrap_or((FileStatus::Nonexistent, FileStatus::Nonexistent))
 }
 
 fn analyze_file_and_update_db(
-    db: &mut HashMap<std::path::PathBuf, (FileStatus, FileStatus)>,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
-    rel_path_without_gpg: &std::path::PathBuf,
+    db: &mut HashMap<PathBuf, (FileStatus, FileStatus)>,
+    plain_root: &PathBuf,
+    gpg_root: &PathBuf,
+    rel_path_without_gpg: &PathBuf,
 ) -> SyncAction {
     let (plain_status_prev, gpg_status_prev) = get_file_status_from_db(db, &rel_path_without_gpg);
 
@@ -327,26 +265,15 @@ fn analyze_file_and_update_db(
     sync_action
 }
 
-fn check_coincide(
-    fp: &std::path::PathBuf,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
-    passphrase: &str,
-) -> bool {
-    let gpg_hash = gpg_file_hash(&add_gpg_extension(&gpg_root.join(fp)), passphrase).unwrap();
-    let plain_hash = plain_file_hash(&plain_root.join(fp)).unwrap();
+fn check_coincide(se: &SyncEntity, passphrase: &str) -> bool {
+    let gpg_hash = gpg_file_hash(&se.as_gpg(), passphrase).unwrap();
+    let plain_hash = plain_file_hash(&se.as_plain()).unwrap();
     gpg_hash == plain_hash
 }
 
-fn push_plain(
-    fp: &std::path::PathBuf,
-    passphrase: &str,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
-) {
+fn push_plain(se: &SyncEntity, passphrase: &str) {
     //    dbg!(&plain_root.join(fp));
-    let mut plain_f = File::open(&plain_root.join(fp)).unwrap();
-    let gpg_data = gpg::encrypt(&mut plain_f, passphrase.as_bytes()).unwrap();
+    let mut plain_f = File::open(&se.as_plain()).unwrap();
 
     //  dbg!(&add_gpg_extension(&gpg_root.join(&fp)));
 
@@ -354,62 +281,57 @@ fn push_plain(
     let mut gpg_f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open(&add_gpg_extension(&gpg_root.join(&fp)))
+        .open(&se.as_gpg())
         .unwrap();
 
-    gpg_f.write_all(&gpg_data).unwrap();
+    gpg::encrypt(&mut plain_f, &mut gpg_f, passphrase.as_bytes()).unwrap();
 }
 
-fn push_gpg(
-    fp: &std::path::PathBuf,
-    passphrase: &str,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
-) {
-    let mut gpg_f = File::open(dbg!(&add_gpg_extension(&gpg_root.join(&fp)))).unwrap();
-    let plain_data = gpg::decrypt(&mut gpg_f, passphrase.as_bytes()).unwrap();
+fn push_gpg(se: &SyncEntity, passphrase: &str) {
+    let mut gpg_f = File::open(&se.as_gpg()).unwrap();
 
     let mut plain_f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open(&plain_root.join(fp))
+        .open(&se.as_plain())
         .unwrap();
-    plain_f.write_all(&plain_data).unwrap();
+
+    gpg::decrypt(&mut gpg_f, &mut plain_f, passphrase.as_bytes()).unwrap();
 }
 
 fn perform_sync_action_and_update_db(
     sync_action: SyncAction,
-    fp: &std::path::PathBuf,
+    se: &SyncEntity,
     db: &mut SyncDb,
-    plain_root: &std::path::PathBuf,
-    gpg_root: &std::path::PathBuf,
     passphrase: &str,
 ) {
     match sync_action {
         SyncAction::None => {}
         SyncAction::PossibleConflict => {
-            if !check_coincide(fp, plain_root, gpg_root, passphrase) {
-                println!("conflict {:?}", fp);
-                // todo mark it as conflicted in db
+            if !check_coincide(se, passphrase) {
+                println!("conflict {:?}", &se.p);
+            // todo mark it as conflicted in db
+            } else {
+                println!("No Conflict!");
             }
         }
         SyncAction::PushPlain => {
-            push_plain(fp, passphrase, plain_root, gpg_root);
+            push_plain(se, passphrase);
         }
         SyncAction::DeletePlain => {
-            std::fs::remove_file(plain_root.join(fp)).unwrap();
+            std::fs::remove_file(&se.plain_root.join(&se.p)).unwrap();
         }
         SyncAction::PushGpg => {
-            push_gpg(fp, passphrase, plain_root, gpg_root);
+            push_gpg(se, passphrase);
         }
         SyncAction::DeleteGpg => {
-            std::fs::remove_file(&add_gpg_extension(&gpg_root.join(fp))).unwrap();
+            std::fs::remove_file(&add_gpg_extension(&se.gpg_root.join(&se.p))).unwrap();
         }
     }
-    db.insert(fp.clone(), file_statuses(fp, plain_root, gpg_root));
+    db.insert(se.p.clone(), file_statuses(se));
 }
 
-fn handle_file_change(fp: &std::path::PathBuf) {}
+//fn handle_file_change(fp: &PathBuf) {}
 
 fn is_hidden(p: &std::path::Path) -> bool {
     for os_s in p {
@@ -427,7 +349,7 @@ fn main() {
 
     // read .gitignore
 
-    let mut plain_files: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut plain_files: HashSet<PathBuf> = HashSet::new();
     visit_dir(&args.plain_root, &mut |de| {
         let relative_path = de
             .path()
@@ -438,7 +360,7 @@ fn main() {
     })
     .unwrap();
 
-    let mut gpg_files: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut gpg_files: HashSet<PathBuf> = HashSet::new();
     visit_dir(&args.gpg_root, &mut |de| {
         if !is_hidden(&de.path()) {
             if de.path().extension() == Some(OsStr::new("gpg")) {
@@ -465,10 +387,12 @@ fn main() {
 
         perform_sync_action_and_update_db(
             sync_action,
-            fp,
+            &SyncEntity {
+                p: fp.clone(),
+                plain_root: &args.plain_root,
+                gpg_root: &args.gpg_root,
+            },
             &mut db,
-            &args.plain_root,
-            &args.gpg_root,
             &args.passphrase,
         );
     }
@@ -492,7 +416,7 @@ fn main() {
                 //println!("db: {:?}", &db);
                 println!("event {:?}", event);
                 match event {
-                    DebouncedEvent::NoticeWrite(p) | DebouncedEvent::NoticeRemove(p) => {
+                    DebouncedEvent::NoticeWrite(_) | DebouncedEvent::NoticeRemove(_) => {
                         println!("noticed begin of write or remove");
                     }
                     DebouncedEvent::Create(p)
@@ -517,20 +441,27 @@ fn main() {
 
                             perform_sync_action_and_update_db(
                                 sync_action,
-                                &p,
+                                &SyncEntity {
+                                    p,
+                                    plain_root: &args.plain_root,
+                                    gpg_root: &args.gpg_root,
+                                },
                                 &mut db,
-                                &args.plain_root,
-                                &args.gpg_root,
-                                &args.passphrase,
+                                &args.passphrase, // could be chosen per file as well
                             );
                         } else {
                             println!("filtered file {:?}", &p);
                         }
                     }
-                    DebouncedEvent::Chmod(p) => {
+                    DebouncedEvent::Chmod(_) => {
                         println!("chmod");
                     }
-                    DebouncedEvent::Rename(p_src, p_dst) => {}
+                    DebouncedEvent::Rename(p_src, p_dst) => {
+                        println!("todo: rename event, from {:?} to {:?}", p_src, p_dst);
+                        // todo: remove p_src from plain/gpg if not filtered
+                        //
+                        // todo: add p_dst to plain/gpg if not filtered
+                    }
                     DebouncedEvent::Rescan => {}
                     DebouncedEvent::Error(e, po) => {
                         println!("error on path {:?}: {}", po, e);
