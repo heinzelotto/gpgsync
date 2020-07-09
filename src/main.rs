@@ -4,14 +4,18 @@ use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{self, DirEntry, File};
-use std::io::{self, Cursor, Read};
+use std::io::{self, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel; // todo crossbeam
                               // use std::str::from_utf8;
 use std::time::Duration;
 use structopt::StructOpt;
 
+use serde::{Deserialize, Serialize};
+
 mod gpg;
+
+const DB_FILENAME: &str = ".gpgsyncdb";
 
 /// A sync entity represents up to two files by a relative path. It can exist unencrypted relative to the plain_root and
 /// encrypted (with .gpg extension) relative to the gpg_root.
@@ -141,7 +145,7 @@ fn remove_gpg_extension(p: &Path) -> PathBuf {
 
 // struct Revision(u64);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum FileStatus {
     Nonexistent,
     Existent(std::time::SystemTime), //, Option<Revision>),
@@ -331,6 +335,39 @@ fn perform_sync_action_and_update_db(
     db.insert(se.p.clone(), file_statuses(se));
 }
 
+fn save_db(db: &SyncDb, fp: &PathBuf) {
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&fp)
+        .unwrap();
+
+    let serialized = serde_json::to_string(db).unwrap();
+
+    f.write_all(&serialized.as_bytes()).unwrap();
+}
+
+fn load_db(fp: &PathBuf) -> SyncDb {
+    match File::open(fp) {
+        Ok(mut f) => {
+            println!("loading existing db from {:?}", fp);
+
+            let mut s = String::new();
+            f.read_to_string(&mut s).unwrap();
+            let deserialized = serde_json::from_str(&s).unwrap();
+
+            deserialized
+        }
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+            println!("no db found yet at {:?}", fp);
+            HashMap::new()
+        }
+        Err(e) => {
+            panic!("{:?}", e);
+        }
+    }
+}
+
 //fn handle_file_change(fp: &PathBuf) {}
 
 fn is_hidden(p: &std::path::Path) -> bool {
@@ -346,6 +383,10 @@ fn is_hidden(p: &std::path::Path) -> bool {
 fn main() {
     let args = Cli::from_args();
     validate_args(&args).unwrap();
+
+    let db_path = args.plain_root.join(&Path::new(DB_FILENAME));
+    let mut db = load_db(&db_path);
+    // todo read .gpgsync_db
 
     // read .gitignore
 
@@ -363,6 +404,7 @@ fn main() {
     let mut gpg_files: HashSet<PathBuf> = HashSet::new();
     visit_dir(&args.gpg_root, &mut |de| {
         if !is_hidden(&de.path()) {
+            // todo make more universal
             if de.path().extension() == Some(OsStr::new("gpg")) {
                 let relative_path_without_gpg = remove_gpg_extension(&de.path())
                     .strip_prefix(&args.gpg_root)
@@ -378,12 +420,11 @@ fn main() {
     })
     .unwrap();
 
-    let mut db = HashMap::new();
-
     for fp in plain_files.union(&gpg_files) {
         let sync_action =
             analyze_file_and_update_db(&mut db, &args.plain_root, &args.gpg_root, &fp);
         println!("{:?} {:?}", fp, sync_action);
+        save_db(&db, &db_path);
 
         perform_sync_action_and_update_db(
             sync_action,
@@ -395,6 +436,7 @@ fn main() {
             &mut db,
             &args.passphrase,
         );
+        save_db(&db, &db_path);
     }
 
     // todo init watcher even before initial sync!
@@ -424,6 +466,7 @@ fn main() {
                     | DebouncedEvent::Remove(p) => {
                         let p = p.strip_prefix(std::env::current_dir().unwrap()).unwrap();
                         if !is_hidden(p) {
+                            // todo make more universal
                             let p = if p.starts_with(&args.plain_root) {
                                 // todo if is not ignored plain file
                                 p.strip_prefix(&args.plain_root).unwrap().to_path_buf()
@@ -437,6 +480,7 @@ fn main() {
                                 &args.gpg_root,
                                 &p,
                             );
+                            save_db(&db, &db_path);
                             println!("{:?} {:?}", &p, sync_action);
 
                             perform_sync_action_and_update_db(
@@ -449,6 +493,7 @@ fn main() {
                                 &mut db,
                                 &args.passphrase, // could be chosen per file as well
                             );
+                            save_db(&db, &db_path);
                         } else {
                             println!("filtered file {:?}", &p);
                         }
