@@ -336,6 +336,8 @@ fn perform_sync_action_and_update_db(
 }
 
 fn save_db(db: &SyncDb, fp: &PathBuf) {
+    // TODO also persist gpg_path to disk to make sure that the database is for the correct sync target
+
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -348,6 +350,9 @@ fn save_db(db: &SyncDb, fp: &PathBuf) {
 }
 
 fn load_db(fp: &PathBuf) -> SyncDb {
+    // TODO also read gpg_path from disk and refuse to load if existing db is for a different sync target
+    // TODO this function would then load "existing sync configuration", not just the db
+
     match File::open(fp) {
         Ok(mut f) => {
             println!("loading existing db from {:?}", fp);
