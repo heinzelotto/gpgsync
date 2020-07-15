@@ -348,41 +348,42 @@ impl GpgSync {
 #[cfg(test)]
 mod test {
 
+    use lazy_static::lazy_static;
     use std::fs;
-    use std::path::Path;
-use lazy_static::lazy_static;
     use std::io::Write;
+    use std::path::Path;
 
-    lazy_static!{
-    static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
-    static ref GPG_ROOT: &'static Path = &Path::new("./gpg_root");
+    lazy_static! {
+        static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
+        static ref GPG_ROOT: &'static Path = &Path::new("./gpg_root");
     }
 
     fn init_dirs() {
         if PLAIN_ROOT.exists() {
-            fs::remove_dir_all(&*PLAIN_ROOT).unwrap();}
+            fs::remove_dir_all(&*PLAIN_ROOT).unwrap();
+        }
         fs::create_dir_all(&*PLAIN_ROOT).unwrap();
 
         if Path::new(&*GPG_ROOT).exists() {
             fs::remove_dir_all(&*GPG_ROOT).unwrap();
         }
-       fs::create_dir_all(&*GPG_ROOT).unwrap();
+        fs::create_dir_all(&*GPG_ROOT).unwrap();
     }
 
     fn make_file(p: &Path, s: &[u8]) {
-     let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(p)
-        .unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(p)
+            .unwrap();
         f.write_all(s).unwrap();
     }
 
     #[test]
     fn test_creation_failure() {
-       // TODO one dir is inside the other
+        // TODO one dir is inside the other
 
-       // TODO dir doesn't exist
+        // TODO dir doesn't exist
     }
 
     #[test]
@@ -395,10 +396,13 @@ use lazy_static::lazy_static;
 
         // GD/notes.txt.gpg -> PD/notes.txt
         init_dirs();
-        make_file(&GPG_ROOT.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+        make_file(
+            &GPG_ROOT.join("notes.txt.gpg"),
+            include_bytes!("notes.txt.gpg"),
+        );
         let _gpgs = super::GpgSync::new(&*PLAIN_ROOT, &*GPG_ROOT, "test").unwrap();
         assert!(PLAIN_ROOT.join("notes.txt").exists());
-   }
+    }
 
     #[test]
     fn test_wrong_passphrase() {
@@ -436,7 +440,7 @@ use lazy_static::lazy_static;
     }
 
     #[test]
-    fn test_database(){
+    fn test_database() {
         // TODO do some syncs, quit, modify plain, start again, and no conflict but pushplain should happen!
     }
 

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+
 /// A sync entity represents up to two files by a relative path. It can exist unencrypted relative to the plain_root and
 /// encrypted (with .gpg extension) relative to the gpg_root.
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -60,5 +61,13 @@ impl<'a> SyncEntity<'a> {
 
     pub fn rel_without_gpg(&self) -> &PathBuf {
         &self.rel_path_without_gpg
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_representation() {
+        // TODO the from_* and as_* methods shall work correctly
     }
 }

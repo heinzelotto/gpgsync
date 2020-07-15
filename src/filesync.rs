@@ -75,3 +75,11 @@ pub fn determine_file_change(prev: FileStatus, cur: FileStatus) -> FileChange {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_sync_logic() {
+        // TODO simulate common situations
+    }
+}
