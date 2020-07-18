@@ -14,7 +14,7 @@ Current and planned features:
 - [X] Encryption of file contents. File names are not encrypted.
 - [X] A single passphrase for all files.
 - [X] Continuously watch the directories and sync when files are modified.
-- [X] Maintain a database of file metadata to detect file modifications that happened since the program last ran. 
+- [X] Maintain a persistent database of file metadata to detect file modifications that happened since the program last ran. 
 - [X] All hidden files are ignored (= files starting with a '.').
 - [X] Ignore `*.gpg` files in the plain dir, ignore non-`*.gpg` files in the gpg dir.
 - [ ] Correctly handle renamed files.
@@ -29,14 +29,14 @@ Non-features:
 
 # Caveats
 
-Only use this if you are doing frequent backups of your data!  This project is in an early stage and not yet thoroughly tested!  I take no responsibility if you lose data with this program, even though I try my hardest to make it not do this.
+**Only use this if you are doing frequent backups of your data!  This project is in an early stage and not yet thoroughly tested!**  I take no responsibility if you lose data with this program, even though I try my hardest to make it not do this.
 
 Bidirectional sync is hard.  Several types of conflicts can occur when data changes at both ends at once.  A database containing the last known file metadata is maintained that is used at startup to detect changes that occurred since the last program run.
 
-Writing Files is dangerous.  File locking mechanisms are often non-obligatory.  Thus, if GPGsync syncs a file while the target file is also written to by another program, something will go wrong.  A full database of all past revisions of a file to retroactively restore files to a valid version in such a case is out of scope for this program and *not* planned.
+Writing files is dangerous.  File locking mechanisms are often non-obligatory.  GPGsync inherits all the perils of editing the same file twice at the same time.  Thus, if GPGsync syncs a file while the target file is also written to by another program, something will go wrong.  A full database of all past revisions of a file to retroactively restore files to a valid version in such a case is out of scope for this program and *not* planned.
 
 That being said, you should be good to go if
-1. you modify files in at most one of the two directories while the program is not running.
+1. while the program is not running, you modify files in at most one of the two directories.
 2. you modify only either the unencrypted or the encrypted version of the file at any single point in time. 
 
 # Installation and Usage
