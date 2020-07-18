@@ -13,6 +13,8 @@ pub struct SyncDb {
 }
 
 impl SyncDb {
+    // TODO: remove [Nonexistent, Nonexistent] entries from the db to remove any remnants of the file names
+
     pub fn get_file_status(&self, se: &SyncEntity) -> (FileStatus, FileStatus) {
         self.db
             .get(se.rel_without_gpg())
@@ -34,6 +36,7 @@ impl SyncDb {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&fp)
             .unwrap();
 
@@ -52,6 +55,7 @@ impl SyncDb {
 
                 let mut s = String::new();
                 f.read_to_string(&mut s).unwrap();
+                dbg!(&s);
                 let deserialized = serde_json::from_str(&s).unwrap();
 
                 SyncDb { db: deserialized }

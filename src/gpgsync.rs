@@ -229,8 +229,12 @@ impl GpgSync {
 
         let mut ses = HashSet::new();
         visit_dir(&plain_root, &mut |de| {
-            let se = SyncEntity::from_plain(&de.path(), &plain_root, &gpg_root);
-            ses.insert(se);
+            if !is_hidden(&de.path()) {
+                let se = SyncEntity::from_plain(&de.path(), &plain_root, &gpg_root);
+                ses.insert(se);
+            } else {
+                println!("filtered file {:?}", &de.path());
+            }
         })
         .unwrap();
 
@@ -292,8 +296,7 @@ impl GpgSync {
                     DebouncedEvent::Create(p)
                     | DebouncedEvent::Write(p)
                     | DebouncedEvent::Remove(p) => {
-                        let p = p.strip_prefix(std::env::current_dir().unwrap()).unwrap();
-                        if !is_hidden(p) {
+                        if !is_hidden(&p) {
                             // todo make more universal
                             let se = if p.starts_with(&self.plain_root) {
                                 // todo if is not ignored plain file
