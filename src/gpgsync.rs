@@ -215,8 +215,8 @@ pub struct GpgSync {
 
 impl GpgSync {
     pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> Result<Self> {
-        let plain_root = plain_root.to_path_buf();
-        let gpg_root = gpg_root.to_path_buf();
+        let plain_root = std::fs::canonicalize(plain_root).unwrap();
+        let gpg_root = std::fs::canonicalize(gpg_root).unwrap();
 
         validate_args(&plain_root, &gpg_root).unwrap();
 
@@ -284,8 +284,34 @@ impl GpgSync {
         })
     }
 
-    pub fn process_events(&mut self) {
-        match self.rx.recv() {
+    fn sync_path(&mut self, p: &Path) {
+        if !is_hidden(&p) {
+            // todo make more universal
+            let se = if p.starts_with(dbg!(&self.plain_root)) {
+                // todo if is not ignored plain file
+                SyncEntity::from_plain(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
+            } else {
+                // todo if is not ignored gpg file
+                SyncEntity::from_gpg(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
+            };
+            let sync_action = analyze_file_and_update_db(&mut self.db, &se);
+            //self.db.save_db(&self.db_path);
+            println!("{:?} {:?}", &p, sync_action);
+
+            perform_sync_action_and_update_db(
+                sync_action,
+                &se,
+                &mut self.db,
+                &self.passphrase, // could be chosen per file as well
+            );
+            self.db.save_db(&self.db_path);
+        } else {
+            println!("filtered file {:?}", &p);
+        }
+    }
+
+    pub fn try_process_events(&mut self) {
+        match self.rx.try_recv() {
             Ok(event) => {
                 //println!("db: {:?}", &db);
                 println!("event {:?}", event);
@@ -296,46 +322,22 @@ impl GpgSync {
                     DebouncedEvent::Create(p)
                     | DebouncedEvent::Write(p)
                     | DebouncedEvent::Remove(p) => {
-                        if !is_hidden(&p) {
-                            // todo make more universal
-                            let se = if p.starts_with(&self.plain_root) {
-                                // todo if is not ignored plain file
-                                SyncEntity::from_plain(
-                                    &p.to_path_buf(),
-                                    &self.plain_root,
-                                    &self.gpg_root,
-                                )
-                            } else {
-                                // todo if is not ignored gpg file
-                                SyncEntity::from_gpg(
-                                    &p.to_path_buf(),
-                                    &self.plain_root,
-                                    &self.gpg_root,
-                                )
-                            };
-                            let sync_action = analyze_file_and_update_db(&mut self.db, &se);
-                            //self.db.save_db(&self.db_path);
-                            println!("{:?} {:?}", &p, sync_action);
-
-                            perform_sync_action_and_update_db(
-                                sync_action,
-                                &se,
-                                &mut self.db,
-                                &self.passphrase, // could be chosen per file as well
-                            );
-                            self.db.save_db(&self.db_path);
-                        } else {
-                            println!("filtered file {:?}", &p);
-                        }
+                        self.sync_path(dbg!(&p));
                     }
                     DebouncedEvent::Chmod(_) => {
                         println!("chmod");
                     }
                     DebouncedEvent::Rename(p_src, p_dst) => {
-                        println!("todo: rename event, from {:?} to {:?}", p_src, p_dst);
-                        // todo: remove p_src from plain/gpg if not filtered
-                        //
-                        // todo: add p_dst to plain/gpg if not filtered
+                        println!("Rename event, from {:?} to {:?}", p_src, p_dst);
+                        // we don't support moving between the two directories
+                        assert!(
+                            !(p_src.starts_with(&self.plain_root)
+                                ^ p_dst.starts_with(&self.plain_root))
+                        );
+
+                        // don't do anything smart for now. Just trigger two sync actions, on p_src and p_dst
+                        self.sync_path(&p_src);
+                        self.sync_path(&p_dst);
                     }
                     DebouncedEvent::Rescan => {}
                     DebouncedEvent::Error(e, po) => {
@@ -343,6 +345,7 @@ impl GpgSync {
                     }
                 }
             }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(e) => println!("file watch error: {:?}", e),
         }
     }
@@ -355,6 +358,26 @@ mod test {
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    fn poll_predicate(p: &mut dyn FnMut() -> bool, timeout: Duration) {
+        let mut remaining = Some(timeout);
+        let decrement = Duration::new(0, 3_000_000);
+        loop {
+            if let Some(rem) = remaining {
+                remaining = rem.checked_sub(decrement);
+            } else {
+                break;
+            }
+
+            if p() {
+                return;
+            }
+
+            std::thread::sleep(decrement);
+        }
+        panic!("predicate did not evaluate to true within {:?}", timeout);
+    }
 
     lazy_static! {
         static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
@@ -444,13 +467,45 @@ mod test {
 
     #[test]
     fn test_rename() {
-        // TODO a file that is renamed is correctly handled
-        // TODO when the target file exists
+        // TODO check failure when the target file exists
+        // TODO check that moving from one directory into the other is not allowed
+        let (pr, gr) = test_roots("test_rename");
+
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+        let mut gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+        assert!(gr.join("notes.txt.gpg").exists());
+
+        std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt")).unwrap();
+
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events();
+
+                !gr.join("notes.txt.gpg").exists() && gr.join("notes_renamed.txt.gpg").exists()
+            },
+            Duration::new(2, 0),
+        );
     }
 
     #[test]
     fn test_running_sync() {
-        // TODO basic stuff also works after the initial sync, when gpgs.process_events() is called
+        let (pr, gr) = test_roots("test_running_sync");
+
+        init_dirs(&pr, &gr);
+        let mut gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+
+        assert!(!gr.join("notes.txt.gpg").exists());
+
+        make_file(&pr.join("notes.txt"), b"hello");
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events();
+
+                gr.join("notes.txt.gpg").exists()
+            },
+            Duration::new(2, 0),
+        );
     }
 
     #[test]

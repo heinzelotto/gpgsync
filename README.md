@@ -17,7 +17,7 @@ Current and planned features:
 - [X] Maintain a persistent database of file metadata to detect file modifications that happened since the program last ran. 
 - [X] All hidden files are ignored (= files starting with a '.').
 - [X] Ignore `*.gpg` files in the plain dir, ignore non-`*.gpg` files in the gpg dir.
-- [ ] Correctly handle renamed files.
+- [X] Correctly handle renamed files.
 - [ ] Respect a .gitignore in the plain directory.
 - [ ] Graceful handling of errors, wrong passphrase, and sync conflicts (currently the program just exits).
 - [ ] More tests.
