@@ -10,6 +10,7 @@ where
     let proto = Protocol::OpenPgp;
 
     let mut ctx = Context::from_protocol(proto)?;
+    ctx.set_flag("no-symkey-cache\0", "1\0").unwrap();
     ctx.set_pinentry_mode(PinentryMode::Loopback)?;
     ctx.with_passphrase_provider(
         |_: PassphraseRequest, out: &mut dyn Write| {
@@ -30,6 +31,7 @@ where
     let proto = Protocol::OpenPgp;
 
     let mut ctx = Context::from_protocol(proto)?;
+    ctx.set_flag("no-symkey-cache\0", "1\0").unwrap();
     ctx.set_pinentry_mode(PinentryMode::Loopback)?;
     ctx.with_passphrase_provider(
         |_: PassphraseRequest, out: &mut dyn Write| {
