@@ -354,29 +354,33 @@ mod test {
     use lazy_static::lazy_static;
     use std::fs;
     use std::io::Write;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     lazy_static! {
         static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
         static ref GPG_ROOT: &'static Path = &Path::new("./gpg_root");
     }
 
-    fn init_dirs() {
-        if PLAIN_ROOT.exists() {
-            fs::remove_dir_all(&*PLAIN_ROOT).unwrap();
-        }
-        fs::create_dir_all(&*PLAIN_ROOT).unwrap();
+    fn test_roots(test_name: &str) -> (PathBuf, PathBuf) {
+        (PLAIN_ROOT.join(test_name), GPG_ROOT.join(test_name))
+    }
 
-        if Path::new(&*GPG_ROOT).exists() {
-            fs::remove_dir_all(&*GPG_ROOT).unwrap();
+    fn init_dirs(pr: &Path, gr: &Path) {
+        if pr.exists() {
+            fs::remove_dir_all(&pr).unwrap();
         }
-        fs::create_dir_all(&*GPG_ROOT).unwrap();
+        fs::create_dir_all(&pr).unwrap();
+
+        if Path::new(&gr).exists() {
+            fs::remove_dir_all(&gr).unwrap();
+        }
+        fs::create_dir_all(&gr).unwrap();
     }
 
     fn make_file(p: &Path, s: &[u8]) {
         let mut f = std::fs::OpenOptions::new()
+            .create_new(true)
             .write(true)
-            .create(true)
             .open(p)
             .unwrap();
         f.write_all(s).unwrap();
@@ -391,25 +395,32 @@ mod test {
 
     #[test]
     fn test_basic() {
+        let (pr, gr) = test_roots("test_basic");
+
         // PD/notes.txt -> GD/notes.txt.gpg
-        init_dirs();
-        make_file(&PLAIN_ROOT.join("notes.txt"), b"hello");
-        let _gpgs = super::GpgSync::new(&*PLAIN_ROOT, &*GPG_ROOT, "test").unwrap();
-        assert!(GPG_ROOT.join("notes.txt.gpg").exists());
+        {
+            init_dirs(&pr, &gr);
+            make_file(&pr.join("notes.txt"), b"hello");
+            let _gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+            assert!(gr.join("notes.txt.gpg").exists());
+        }
 
         // GD/notes.txt.gpg -> PD/notes.txt
-        init_dirs();
-        make_file(
-            &GPG_ROOT.join("notes.txt.gpg"),
-            include_bytes!("notes.txt.gpg"),
-        );
-        let _gpgs = super::GpgSync::new(&*PLAIN_ROOT, &*GPG_ROOT, "test").unwrap();
-        assert!(PLAIN_ROOT.join("notes.txt").exists());
+        {
+            init_dirs(&pr, &gr);
+            make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+            let _gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+            assert!(pr.join("notes.txt").exists());
+        }
     }
 
     #[test]
+    #[should_panic]
     fn test_wrong_passphrase() {
-        // TODO decrypt with wrong passphrase
+        let (pr, gr) = test_roots("test_wrong_passphrase");
+        init_dirs(&pr, &gr);
+        make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+        let _gpgs = super::GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
     }
 
     #[test]
