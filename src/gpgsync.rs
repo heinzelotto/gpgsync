@@ -222,8 +222,8 @@ impl GpgSync {
 
         let db_path = &plain_root.join(&Path::new(DB_FILENAME));
 
-        let mut db = SyncDb::load_db(db_path);
-        // todo read .gpgsync_db
+        let mut db = SyncDb::load_db(db_path).unwrap_or(SyncDb::new(&gpg_root));
+        assert!(db.gpg_root() == gpg_root);
 
         // read .gitignore
 
@@ -252,6 +252,8 @@ impl GpgSync {
             }
         })
         .unwrap();
+
+        // TODO: also add files from db to ses
 
         for se in ses {
             let sync_action = analyze_file_and_update_db(&mut db, &se);
@@ -388,16 +390,16 @@ mod test {
         (PLAIN_ROOT.join(test_name), GPG_ROOT.join(test_name))
     }
 
-    fn init_dirs(pr: &Path, gr: &Path) {
-        if pr.exists() {
-            fs::remove_dir_all(&pr).unwrap();
+    fn init_dir(p: &Path) {
+        if p.exists() {
+            fs::remove_dir_all(&p).unwrap();
         }
-        fs::create_dir_all(&pr).unwrap();
+        fs::create_dir_all(&p).unwrap();
+    }
 
-        if Path::new(&gr).exists() {
-            fs::remove_dir_all(&gr).unwrap();
-        }
-        fs::create_dir_all(&gr).unwrap();
+    fn init_dirs(pr: &Path, gr: &Path) {
+        init_dir(pr);
+        init_dir(gr);
     }
 
     fn make_file(p: &Path, s: &[u8]) {
@@ -514,7 +516,17 @@ mod test {
     }
 
     #[test]
-    fn test_changed_target() {
-        // TODO panic if saved database for another GPG_ROOT is found
+    #[should_panic]
+    fn test_changed_gpgroot() {
+        let (pr, gr) = test_roots("test_changed_gpgroot");
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+        let gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+        assert!(gr.join("notes.txt.gpg").exists());
+        std::mem::drop(gpgs);
+
+        let (_, gr2) = test_roots("test_changed_gpgroot2");
+        init_dir(&gr2);
+        let _gpgs = super::GpgSync::new(&pr, &gr2, "test").unwrap();
     }
 }

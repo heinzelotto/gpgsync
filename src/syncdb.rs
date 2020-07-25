@@ -1,19 +1,27 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
-
-//use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::filesync::*;
 use crate::syncentity::*;
 
+#[derive(Serialize, Deserialize)]
 pub struct SyncDb {
+    gpg_root: PathBuf,
     db: HashMap<PathBuf, (FileStatus, FileStatus)>,
 }
 
 impl SyncDb {
     // TODO: remove [Nonexistent, Nonexistent] entries from the db to remove any remnants of the file names
+
+    pub fn new(gpg_root: &Path) -> Self {
+        Self {
+            gpg_root: gpg_root.to_owned(),
+            db: HashMap::new(),
+        }
+    }
 
     pub fn get_file_status(&self, se: &SyncEntity) -> (FileStatus, FileStatus) {
         self.db
@@ -40,12 +48,12 @@ impl SyncDb {
             .open(&fp)
             .unwrap();
 
-        let serialized = serde_json::to_string(&self.db).unwrap();
+        let serialized = serde_json::to_string(&self).unwrap();
 
         f.write_all(&serialized.as_bytes()).unwrap();
     }
 
-    pub fn load_db(fp: &PathBuf) -> Self {
+    pub fn load_db(fp: &PathBuf) -> Option<Self> {
         // TODO also read gpg_path from disk and refuse to load if existing db is for a different sync target
         // TODO this function would then load "existing sync configuration", not just the db
 
@@ -58,13 +66,17 @@ impl SyncDb {
                 dbg!(&s);
                 let deserialized = serde_json::from_str(&s).unwrap();
 
-                SyncDb { db: deserialized }
+                Some(deserialized)
             }
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 println!("no db found yet at {:?}", fp);
-                SyncDb { db: HashMap::new() }
+                None
             }
             Err(e) => panic!("{:?}", e),
         }
+    }
+
+    pub fn gpg_root(&self) -> &Path {
+        &self.gpg_root
     }
 }
