@@ -7,10 +7,13 @@ use std::path::{Path, PathBuf};
 use crate::filesync::*;
 use crate::syncentity::*;
 
+const DB_VERSION: u32 = 1;
+
 #[derive(Serialize, Deserialize)]
 pub struct SyncDb {
     gpg_root: PathBuf,
     db: HashMap<PathBuf, (FileStatus, FileStatus)>,
+    db_version: u32,
 }
 
 impl SyncDb {
@@ -20,6 +23,7 @@ impl SyncDb {
         Self {
             gpg_root: gpg_root.to_owned(),
             db: HashMap::new(),
+            db_version: DB_VERSION,
         }
     }
 
@@ -64,7 +68,10 @@ impl SyncDb {
                 let mut s = String::new();
                 f.read_to_string(&mut s).unwrap();
                 dbg!(&s);
-                let deserialized = serde_json::from_str(&s).unwrap();
+                let deserialized: SyncDb = serde_json::from_str(&s).unwrap();
+
+                // make sure the db schema is correct
+                assert!(deserialized.db_version == DB_VERSION);
 
                 Some(deserialized)
             }
