@@ -313,7 +313,7 @@ impl GpgSync {
     }
 
     pub fn try_process_events(&mut self) {
-        match self.rx.try_recv() {
+        match self.rx.recv_timeout(Duration::new(1, 0)) {
             Ok(event) => {
                 //println!("db: {:?}", &db);
                 println!("event {:?}", event);
@@ -347,8 +347,8 @@ impl GpgSync {
                     }
                 }
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(e) => println!("file watch error: {:?}", e),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => println!("watcher died."),
         }
     }
 }
