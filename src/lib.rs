@@ -19,6 +19,9 @@ mod syncentity;
 /// File name of the database.  Will be saved inside the plain root directory.
 const DB_FILENAME: &str = ".gpgsyncdb";
 
+/// Delay for which filesystem events are held back to e. g. clean up duplicates.
+const WATCHER_DEBOUNCE_DURATION: Duration = Duration::from_secs(1);
+
 /// The GPGsync instance.
 pub struct GpgSync {
     /// The sync database is persisted in the `plain_root` across program runs.
@@ -46,10 +49,10 @@ impl GpgSync {
     pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> anyhow::Result<Self> {
         use notify::Watcher;
 
-        let plain_root = std::fs::canonicalize(plain_root).unwrap();
-        let gpg_root = std::fs::canonicalize(gpg_root).unwrap();
+        let plain_root = std::fs::canonicalize(plain_root)?;
+        let gpg_root = std::fs::canonicalize(gpg_root)?;
 
-        validate_args(&plain_root, &gpg_root).unwrap();
+        validate_args(&plain_root, &gpg_root)?;
 
         let db_path = &plain_root.join(DB_FILENAME);
 
@@ -66,8 +69,7 @@ impl GpgSync {
             } else {
                 println!("filtered file {:?}", &de.path());
             }
-        })
-        .unwrap();
+        })?;
 
         visit_dir(&gpg_root, &mut |de| {
             if !is_hidden(&de.path()) {
@@ -81,8 +83,7 @@ impl GpgSync {
             } else {
                 println!("filtered file {:?}", &de.path());
             }
-        })
-        .unwrap();
+        })?;
 
         // TODO: also add files from db to ses
 
@@ -97,12 +98,10 @@ impl GpgSync {
         // TODO init watcher even before initial sync!
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut watcher = notify::watcher(tx, Duration::from_secs(1)).unwrap();
+        let mut watcher = notify::watcher(tx, WATCHER_DEBOUNCE_DURATION)?;
 
-        watcher
-            .watch(&plain_root, notify::RecursiveMode::Recursive)
-            .unwrap();
-        watcher.watch(&gpg_root, notify::RecursiveMode::Recursive).unwrap();
+        watcher.watch(&plain_root, notify::RecursiveMode::Recursive)?;
+        watcher.watch(&gpg_root, notify::RecursiveMode::Recursive)?;
 
         Ok(Self {
             db,
@@ -119,18 +118,19 @@ impl GpgSync {
     ///
     /// The functions blocks for at most `timeout` until an event is received or
     /// the watcher terminates.
-    pub fn try_process_events(&mut self, timeout: Duration) {
+    pub fn try_process_events(&mut self, timeout: Duration) -> anyhow::Result<()> {
         match self.rx.recv_timeout(timeout) {
             Ok(event) => {
                 println!("event {:?}", event);
                 match event {
-                    notify::DebouncedEvent::NoticeWrite(_) | notify::DebouncedEvent::NoticeRemove(_) => {
+                    notify::DebouncedEvent::NoticeWrite(_)
+                    | notify::DebouncedEvent::NoticeRemove(_) => {
                         println!("noticed begin of write or remove");
                     }
                     notify::DebouncedEvent::Create(p)
                     | notify::DebouncedEvent::Write(p)
                     | notify::DebouncedEvent::Remove(p) => {
-                        self.sync_path(dbg!(&p));
+                        self.do_sync_path(dbg!(&p));
                     }
                     notify::DebouncedEvent::Chmod(_) => {
                         println!("chmod");
@@ -144,8 +144,8 @@ impl GpgSync {
                         );
 
                         // don't do anything smart for now. Just trigger two sync actions, on p_src and p_dst
-                        self.sync_path(&p_src);
-                        self.sync_path(&p_dst);
+                        self.do_sync_path(&p_src);
+                        self.do_sync_path(&p_dst);
                     }
                     notify::DebouncedEvent::Rescan => {}
                     notify::DebouncedEvent::Error(e, po) => {
@@ -154,12 +154,14 @@ impl GpgSync {
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(_) => println!("watcher died."),
+            Err(_) => return Err(anyhow!("watcher died.")),
         }
+
+        Ok(())
     }
 
     /// Analyze a file at a path and perform a sync action if necessary.
-    fn sync_path(&mut self, p: &Path) {
+    fn do_sync_path(&mut self, p: &Path) {
         if !is_hidden(&p) {
             // TODO enhance ignoring of files
             let se = if p.starts_with(dbg!(&self.plain_root)) {
@@ -348,7 +350,6 @@ fn is_hidden(p: &std::path::Path) -> bool {
     false
 }
 
-
 #[cfg(test)]
 mod test {
 
@@ -479,7 +480,8 @@ mod test {
 
         poll_predicate(
             &mut || {
-                gpgs.try_process_events(Duration::new(0, 200_000_000));
+                gpgs.try_process_events(Duration::new(0, 200_000_000))
+                    .unwrap();
 
                 !gr.join("notes.txt.gpg").exists() && gr.join("notes_renamed.txt.gpg").exists()
             },
@@ -499,7 +501,8 @@ mod test {
         make_file(&pr.join("notes.txt"), b"hello");
         poll_predicate(
             &mut || {
-                gpgs.try_process_events(Duration::new(0, 200_000_000));
+                gpgs.try_process_events(Duration::new(0, 200_000_000))
+                    .unwrap();
 
                 gr.join("notes.txt.gpg").exists()
             },
