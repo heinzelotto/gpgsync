@@ -68,12 +68,8 @@ pub fn check_coincide(se: &SyncEntity, passphrase: &str) -> bool {
 }
 
 pub fn push_plain(se: &SyncEntity, passphrase: &str) {
-    //    dbg!(&plain_root.join(fp));
     let mut plain_f = File::open(&se.as_plain()).unwrap();
 
-    //  dbg!(&add_gpg_extension(&gpg_root.join(&fp)));
-
-    //dbg!(&gpg_data);
     let mut gpg_f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -125,23 +121,11 @@ fn gpg_file_hash(p: &Path, passphrase: &str) -> io::Result<Vec<u8>> {
 
     gpg::decrypt(&mut f, &mut decrypted, passphrase.as_bytes()).unwrap();
 
-    //println!("{:?}", from_utf8(&df));
-
     hash_all(&mut Cursor::new(decrypted))
 }
-// #[derive(Debug)]
-// enum SyncHash {
-//     Agree(Vec<u8>),
-//     Conflict,
-// }
-
-// struct Revision(u64);
 
 fn analyze_file_and_update_db(db: &mut SyncDb, se: &SyncEntity) -> SyncAction {
     let (plain_status_prev, gpg_status_prev) = db.get_file_status(&se);
-
-    //dbg!(plain_status_prev);
-    //dbg!(gpg_status_prev);
 
     let plain_status_cur = dbg!(file_status(&se.as_plain()));
     let gpg_status_cur = dbg!(file_status(&se.as_gpg()));
@@ -152,8 +136,6 @@ fn analyze_file_and_update_db(db: &mut SyncDb, se: &SyncEntity) -> SyncAction {
     );
 
     db.set_file_status(&se, plain_status_cur, gpg_status_cur);
-
-    // persist store db to disk
 
     sync_action
 }
@@ -191,8 +173,6 @@ fn perform_sync_action_and_update_db(
     db.set_file_status(&se, plain_status, gpg_status);
 }
 
-//fn handle_file_change(fp: &PathBuf) {}
-
 fn is_hidden(p: &std::path::Path) -> bool {
     for os_s in p {
         let s = os_s.to_string_lossy();
@@ -224,7 +204,7 @@ impl GpgSync {
         let mut db = SyncDb::load_db(db_path).unwrap_or(SyncDb::new(&gpg_root));
         assert!(db.gpg_root() == gpg_root);
 
-        // read .gitignore
+        // TODO read .gitignore
 
         let mut ses = HashSet::new();
         visit_dir(&plain_root, &mut |de| {
@@ -239,7 +219,7 @@ impl GpgSync {
 
         visit_dir(&gpg_root, &mut |de| {
             if !is_hidden(&de.path()) {
-                // todo make more universal
+            // TODO enhance ignoring of files
                 if de.path().extension() == Some(OsStr::new("gpg")) {
                     let se = SyncEntity::from_gpg(&de.path(), &plain_root, &gpg_root);
                     ses.insert(se);
@@ -257,16 +237,14 @@ impl GpgSync {
         for se in ses {
             let sync_action = analyze_file_and_update_db(&mut db, &se);
             println!("{:?} {:?}", &se, sync_action);
-            //db.save_db(&db_path);
 
             perform_sync_action_and_update_db(sync_action, &se, &mut db, &passphrase);
             db.save_db(&db_path);
         }
 
-        // todo init watcher even before initial sync!
+        // TODO init watcher even before initial sync!
 
         let (tx, rx) = std::sync::mpsc::channel();
-        // TODO move to other thread
         let mut watcher = watcher(tx, Duration::from_secs(1)).unwrap();
 
         watcher
@@ -287,16 +265,13 @@ impl GpgSync {
 
     fn sync_path(&mut self, p: &Path) {
         if !is_hidden(&p) {
-            // todo make more universal
+            // TODO enhance ignoring of files
             let se = if p.starts_with(dbg!(&self.plain_root)) {
-                // todo if is not ignored plain file
                 SyncEntity::from_plain(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
             } else {
-                // todo if is not ignored gpg file
                 SyncEntity::from_gpg(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
             };
             let sync_action = analyze_file_and_update_db(&mut self.db, &se);
-            //self.db.save_db(&self.db_path);
             println!("{:?} {:?}", &p, sync_action);
 
             perform_sync_action_and_update_db(
@@ -314,7 +289,6 @@ impl GpgSync {
     pub fn try_process_events(&mut self) {
         match self.rx.recv_timeout(Duration::new(1, 0)) {
             Ok(event) => {
-                //println!("db: {:?}", &db);
                 println!("event {:?}", event);
                 match event {
                     DebouncedEvent::NoticeWrite(_) | DebouncedEvent::NoticeRemove(_) => {
@@ -355,8 +329,9 @@ impl GpgSync {
 #[cfg(test)]
 mod test {
 
+    use super::GpgSync;
+
     use lazy_static::lazy_static;
-    use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -391,9 +366,9 @@ mod test {
 
     fn init_dir(p: &Path) {
         if p.exists() {
-            fs::remove_dir_all(&p).unwrap();
+            std::fs::remove_dir_all(&p).unwrap();
         }
-        fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(&p).unwrap();
     }
 
     fn init_dirs(pr: &Path, gr: &Path) {
@@ -425,7 +400,7 @@ mod test {
         {
             init_dirs(&pr, &gr);
             make_file(&pr.join("notes.txt"), b"hello");
-            let _gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+            let _gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
             assert!(gr.join("notes.txt.gpg").exists());
         }
 
@@ -433,7 +408,7 @@ mod test {
         {
             init_dirs(&pr, &gr);
             make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
-            let _gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+            let _gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
             assert!(pr.join("notes.txt").exists());
         }
     }
@@ -444,7 +419,7 @@ mod test {
         let (pr, gr) = test_roots("test_wrong_passphrase");
         init_dirs(&pr, &gr);
         make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
-        let _gpgs = super::GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
+        let _gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
     }
 
     #[test]
@@ -474,7 +449,7 @@ mod test {
 
         init_dirs(&pr, &gr);
         make_file(&pr.join("notes.txt"), b"hello");
-        let mut gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+        let mut gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
         assert!(gr.join("notes.txt.gpg").exists());
 
         std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt")).unwrap();
@@ -494,7 +469,7 @@ mod test {
         let (pr, gr) = test_roots("test_running_sync");
 
         init_dirs(&pr, &gr);
-        let mut gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+        let mut gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
 
         assert!(!gr.join("notes.txt.gpg").exists());
 
@@ -520,12 +495,12 @@ mod test {
         let (pr, gr) = test_roots("test_changed_gpgroot");
         init_dirs(&pr, &gr);
         make_file(&pr.join("notes.txt"), b"hello");
-        let gpgs = super::GpgSync::new(&pr, &gr, "test").unwrap();
+        let gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
         assert!(gr.join("notes.txt.gpg").exists());
         std::mem::drop(gpgs);
 
         let (_, gr2) = test_roots("test_changed_gpgroot2");
         init_dir(&gr2);
-        let _gpgs = super::GpgSync::new(&pr, &gr2, "test").unwrap();
+        let _gpgs = GpgSync::new(&pr, &gr2, "test").unwrap();
     }
 }

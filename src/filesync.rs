@@ -22,11 +22,10 @@ pub enum SyncAction {
     DeletePlain,
     PushGpg,
     DeleteGpg,
-    //Inconsistency(Box<SyncAction>),
 }
 
 pub fn determine_sync_action(plain: FileChange, gpg: FileChange) -> SyncAction {
-    // todo if files were conflicted, deletion or modification of one should not trigger a change to the other
+    // TODO if files were conflicted, deletion or modification of one should not trigger a change to the other
     match (plain, gpg) {
         (FileChange::NoChange(_), FileChange::NoChange(_)) => SyncAction::None,
         (FileChange::NoChange(FileStatus::Nonexistent), FileChange::Add) => SyncAction::PushGpg,
