@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::anyhow;
-use notify::{watcher, DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
 use filesync::{FileStatus, SyncAction};
 use syncdb::SyncDb;
@@ -17,7 +16,172 @@ mod gpg;
 mod syncdb;
 mod syncentity;
 
+/// File name of the database.  Will be saved inside the plain root directory.
 const DB_FILENAME: &str = ".gpgsyncdb";
+
+/// The GPGsync instance.
+pub struct GpgSync {
+    /// The sync database is persisted in the `plain_root` across program runs.
+    db: SyncDb,
+    /// Full path where the DB is stored.
+    db_path: PathBuf,
+    /// Directory containing all unencrypted files.
+    plain_root: PathBuf,
+    /// Directory containing all encrypted files.
+    gpg_root: PathBuf,
+    /// Passphrase used for all encryption.
+    passphrase: String,
+    /// Channel to receive all file watcher events on.
+    rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
+    /// The file watcher.  Must be kept alive while the program is running
+    _watcher: notify::RecommendedWatcher,
+}
+
+impl GpgSync {
+    /// Returns a new GPGsync.
+    ///
+    /// When constructing a new GPGsync, an existing database is loaded if
+    /// existing. An initial sync is performed and the file watcher is started,
+    /// whose events can be processed by calls to `try_process_events()`.
+    pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> anyhow::Result<Self> {
+        use notify::Watcher;
+
+        let plain_root = std::fs::canonicalize(plain_root).unwrap();
+        let gpg_root = std::fs::canonicalize(gpg_root).unwrap();
+
+        validate_args(&plain_root, &gpg_root).unwrap();
+
+        let db_path = &plain_root.join(DB_FILENAME);
+
+        let mut db = SyncDb::load_db(db_path).unwrap_or(SyncDb::new(&gpg_root));
+        assert!(db.gpg_root() == gpg_root);
+
+        // TODO read .gitignore
+
+        let mut ses = HashSet::new();
+        visit_dir(&plain_root, &mut |de| {
+            if !is_hidden(&de.path()) {
+                let se = SyncEntity::from_plain(&de.path(), &plain_root, &gpg_root);
+                ses.insert(se);
+            } else {
+                println!("filtered file {:?}", &de.path());
+            }
+        })
+        .unwrap();
+
+        visit_dir(&gpg_root, &mut |de| {
+            if !is_hidden(&de.path()) {
+                // TODO enhance ignoring of files
+                if de.path().extension() == Some(OsStr::new("gpg")) {
+                    let se = SyncEntity::from_gpg(&de.path(), &plain_root, &gpg_root);
+                    ses.insert(se);
+                } else {
+                    println!("In gpg dir, skipping non-.gpg file: {:?}", de)
+                }
+            } else {
+                println!("filtered file {:?}", &de.path());
+            }
+        })
+        .unwrap();
+
+        // TODO: also add files from db to ses
+
+        for se in ses {
+            let sync_action = analyze_file_and_update_db(&mut db, &se);
+            println!("{:?} {:?}", &se, sync_action);
+
+            perform_sync_action_and_update_db(sync_action, &se, &mut db, &passphrase);
+            db.save_db(&db_path);
+        }
+
+        // TODO init watcher even before initial sync!
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = notify::watcher(tx, Duration::from_secs(1)).unwrap();
+
+        watcher
+            .watch(&plain_root, notify::RecursiveMode::Recursive)
+            .unwrap();
+        watcher.watch(&gpg_root, notify::RecursiveMode::Recursive).unwrap();
+
+        Ok(Self {
+            db,
+            db_path: db_path.clone(),
+            plain_root: plain_root.clone(),
+            gpg_root: gpg_root.clone(),
+            passphrase: passphrase.to_string(),
+            rx,
+            _watcher: watcher,
+        })
+    }
+
+    /// Receive new events from the file watcher and perform sync actions if necessary.
+    ///
+    /// The functions blocks for at most `timeout` until an event is received or
+    /// the watcher terminates.
+    pub fn try_process_events(&mut self, timeout: Duration) {
+        match self.rx.recv_timeout(timeout) {
+            Ok(event) => {
+                println!("event {:?}", event);
+                match event {
+                    notify::DebouncedEvent::NoticeWrite(_) | notify::DebouncedEvent::NoticeRemove(_) => {
+                        println!("noticed begin of write or remove");
+                    }
+                    notify::DebouncedEvent::Create(p)
+                    | notify::DebouncedEvent::Write(p)
+                    | notify::DebouncedEvent::Remove(p) => {
+                        self.sync_path(dbg!(&p));
+                    }
+                    notify::DebouncedEvent::Chmod(_) => {
+                        println!("chmod");
+                    }
+                    notify::DebouncedEvent::Rename(p_src, p_dst) => {
+                        println!("Rename event, from {:?} to {:?}", p_src, p_dst);
+                        // we don't support moving between the two directories
+                        assert!(
+                            !(p_src.starts_with(&self.plain_root)
+                                ^ p_dst.starts_with(&self.plain_root))
+                        );
+
+                        // don't do anything smart for now. Just trigger two sync actions, on p_src and p_dst
+                        self.sync_path(&p_src);
+                        self.sync_path(&p_dst);
+                    }
+                    notify::DebouncedEvent::Rescan => {}
+                    notify::DebouncedEvent::Error(e, po) => {
+                        println!("error on path {:?}: {}", po, e);
+                    }
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => println!("watcher died."),
+        }
+    }
+
+    /// Analyze a file at a path and perform a sync action if necessary.
+    fn sync_path(&mut self, p: &Path) {
+        if !is_hidden(&p) {
+            // TODO enhance ignoring of files
+            let se = if p.starts_with(dbg!(&self.plain_root)) {
+                SyncEntity::from_plain(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
+            } else {
+                SyncEntity::from_gpg(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
+            };
+            let sync_action = analyze_file_and_update_db(&mut self.db, &se);
+            println!("{:?} {:?}", &p, sync_action);
+
+            perform_sync_action_and_update_db(
+                sync_action,
+                &se,
+                &mut self.db,
+                &self.passphrase, // could be chosen per file as well
+            );
+            self.db.save_db(&self.db_path);
+        } else {
+            println!("filtered file {:?}", &p);
+        }
+    }
+}
 
 fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> anyhow::Result<()> {
     if plain_root.starts_with(&gpg_root) || gpg_root.starts_with(&plain_root) {
@@ -48,6 +212,7 @@ fn visit_dir(dir: &Path, cb: &mut dyn FnMut(&DirEntry)) -> io::Result<()> {
     }
     Ok(())
 }
+
 pub fn file_status(fp: &PathBuf) -> FileStatus {
     if !fp.exists() {
         return FileStatus::Nonexistent;
@@ -182,149 +347,7 @@ fn is_hidden(p: &std::path::Path) -> bool {
     }
     false
 }
-pub struct GpgSync {
-    db: SyncDb,
-    db_path: PathBuf,
-    plain_root: PathBuf,
-    gpg_root: PathBuf,
-    passphrase: String,
-    rx: std::sync::mpsc::Receiver<DebouncedEvent>,
-    _watcher: RecommendedWatcher,
-}
 
-impl GpgSync {
-    pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> anyhow::Result<Self> {
-        let plain_root = std::fs::canonicalize(plain_root).unwrap();
-        let gpg_root = std::fs::canonicalize(gpg_root).unwrap();
-
-        validate_args(&plain_root, &gpg_root).unwrap();
-
-        let db_path = &plain_root.join(&Path::new(DB_FILENAME));
-
-        let mut db = SyncDb::load_db(db_path).unwrap_or(SyncDb::new(&gpg_root));
-        assert!(db.gpg_root() == gpg_root);
-
-        // TODO read .gitignore
-
-        let mut ses = HashSet::new();
-        visit_dir(&plain_root, &mut |de| {
-            if !is_hidden(&de.path()) {
-                let se = SyncEntity::from_plain(&de.path(), &plain_root, &gpg_root);
-                ses.insert(se);
-            } else {
-                println!("filtered file {:?}", &de.path());
-            }
-        })
-        .unwrap();
-
-        visit_dir(&gpg_root, &mut |de| {
-            if !is_hidden(&de.path()) {
-            // TODO enhance ignoring of files
-                if de.path().extension() == Some(OsStr::new("gpg")) {
-                    let se = SyncEntity::from_gpg(&de.path(), &plain_root, &gpg_root);
-                    ses.insert(se);
-                } else {
-                    println!("In gpg dir, skipping non-.gpg file: {:?}", de)
-                }
-            } else {
-                println!("filtered file {:?}", &de.path());
-            }
-        })
-        .unwrap();
-
-        // TODO: also add files from db to ses
-
-        for se in ses {
-            let sync_action = analyze_file_and_update_db(&mut db, &se);
-            println!("{:?} {:?}", &se, sync_action);
-
-            perform_sync_action_and_update_db(sync_action, &se, &mut db, &passphrase);
-            db.save_db(&db_path);
-        }
-
-        // TODO init watcher even before initial sync!
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut watcher = watcher(tx, Duration::from_secs(1)).unwrap();
-
-        watcher
-            .watch(&plain_root, RecursiveMode::Recursive)
-            .unwrap();
-        watcher.watch(&gpg_root, RecursiveMode::Recursive).unwrap();
-
-        Ok(Self {
-            db,
-            db_path: db_path.clone(),
-            plain_root: plain_root.clone(),
-            gpg_root: gpg_root.clone(),
-            passphrase: passphrase.to_string(),
-            rx,
-            _watcher: watcher,
-        })
-    }
-
-    fn sync_path(&mut self, p: &Path) {
-        if !is_hidden(&p) {
-            // TODO enhance ignoring of files
-            let se = if p.starts_with(dbg!(&self.plain_root)) {
-                SyncEntity::from_plain(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
-            } else {
-                SyncEntity::from_gpg(&p.to_path_buf(), &self.plain_root, &self.gpg_root)
-            };
-            let sync_action = analyze_file_and_update_db(&mut self.db, &se);
-            println!("{:?} {:?}", &p, sync_action);
-
-            perform_sync_action_and_update_db(
-                sync_action,
-                &se,
-                &mut self.db,
-                &self.passphrase, // could be chosen per file as well
-            );
-            self.db.save_db(&self.db_path);
-        } else {
-            println!("filtered file {:?}", &p);
-        }
-    }
-
-    pub fn try_process_events(&mut self) {
-        match self.rx.recv_timeout(Duration::new(1, 0)) {
-            Ok(event) => {
-                println!("event {:?}", event);
-                match event {
-                    DebouncedEvent::NoticeWrite(_) | DebouncedEvent::NoticeRemove(_) => {
-                        println!("noticed begin of write or remove");
-                    }
-                    DebouncedEvent::Create(p)
-                    | DebouncedEvent::Write(p)
-                    | DebouncedEvent::Remove(p) => {
-                        self.sync_path(dbg!(&p));
-                    }
-                    DebouncedEvent::Chmod(_) => {
-                        println!("chmod");
-                    }
-                    DebouncedEvent::Rename(p_src, p_dst) => {
-                        println!("Rename event, from {:?} to {:?}", p_src, p_dst);
-                        // we don't support moving between the two directories
-                        assert!(
-                            !(p_src.starts_with(&self.plain_root)
-                                ^ p_dst.starts_with(&self.plain_root))
-                        );
-
-                        // don't do anything smart for now. Just trigger two sync actions, on p_src and p_dst
-                        self.sync_path(&p_src);
-                        self.sync_path(&p_dst);
-                    }
-                    DebouncedEvent::Rescan => {}
-                    DebouncedEvent::Error(e, po) => {
-                        println!("error on path {:?}: {}", po, e);
-                    }
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(_) => println!("watcher died."),
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -456,7 +479,7 @@ mod test {
 
         poll_predicate(
             &mut || {
-                gpgs.try_process_events();
+                gpgs.try_process_events(Duration::new(0, 200_000_000));
 
                 !gr.join("notes.txt.gpg").exists() && gr.join("notes_renamed.txt.gpg").exists()
             },
@@ -476,7 +499,7 @@ mod test {
         make_file(&pr.join("notes.txt"), b"hello");
         poll_predicate(
             &mut || {
-                gpgs.try_process_events();
+                gpgs.try_process_events(Duration::new(0, 200_000_000));
 
                 gr.join("notes.txt.gpg").exists()
             },

@@ -20,6 +20,6 @@ fn main() {
         gpgsync::GpgSync::new(&args.plain_root, &args.gpg_root, &args.passphrase).unwrap();
 
     loop {
-        gpg_sync.try_process_events();
+        gpg_sync.try_process_events(std::time::Duration::new(10, 0));
     }
 }
