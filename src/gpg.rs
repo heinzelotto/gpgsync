@@ -1,19 +1,22 @@
-use gpgme::{error::Result, Context, IntoData, PassphraseRequest, PinentryMode, Protocol};
 use std::io::Write;
 
-// todo refactor function into signature Read -> Write function
-pub fn decrypt<'c, 'p, C, P>(ciphertext_in: C, plaintext_out: P, passphrase: &[u8]) -> Result<()>
+// TODO refactor function into signature Read -> Write function
+pub fn decrypt<'c, 'p, C, P>(
+    ciphertext_in: C,
+    plaintext_out: P,
+    passphrase: &[u8],
+) -> gpgme::error::Result<()>
 where
-    C: IntoData<'c>,
-    P: IntoData<'p>,
+    C: gpgme::IntoData<'c>,
+    P: gpgme::IntoData<'p>,
 {
-    let proto = Protocol::OpenPgp;
+    let proto = gpgme::Protocol::OpenPgp;
 
-    let mut ctx = Context::from_protocol(proto)?;
+    let mut ctx = gpgme::Context::from_protocol(proto)?;
     ctx.set_flag("no-symkey-cache\0", "1\0").unwrap();
-    ctx.set_pinentry_mode(PinentryMode::Loopback)?;
+    ctx.set_pinentry_mode(gpgme::PinentryMode::Loopback)?;
     ctx.with_passphrase_provider(
-        |_: PassphraseRequest, out: &mut dyn Write| {
+        |_: gpgme::PassphraseRequest, out: &mut dyn Write| {
             out.write_all(passphrase)?;
             Ok(())
         },
@@ -22,19 +25,23 @@ where
     Ok(())
 }
 
-// todo refactor function into signature Read -> Write
-pub fn encrypt<'p, 'c, P, C>(plaintext_in: P, ciphertext_out: C, passphrase: &[u8]) -> Result<()>
+// TODO refactor function into signature Read -> Write
+pub fn encrypt<'p, 'c, P, C>(
+    plaintext_in: P,
+    ciphertext_out: C,
+    passphrase: &[u8],
+) -> gpgme::error::Result<()>
 where
-    P: IntoData<'p>,
-    C: IntoData<'c>,
+    P: gpgme::IntoData<'p>,
+    C: gpgme::IntoData<'c>,
 {
-    let proto = Protocol::OpenPgp;
+    let proto = gpgme::Protocol::OpenPgp;
 
-    let mut ctx = Context::from_protocol(proto)?;
+    let mut ctx = gpgme::Context::from_protocol(proto)?;
     ctx.set_flag("no-symkey-cache\0", "1\0").unwrap();
-    ctx.set_pinentry_mode(PinentryMode::Loopback)?;
+    ctx.set_pinentry_mode(gpgme::PinentryMode::Loopback)?;
     ctx.with_passphrase_provider(
-        |_: PassphraseRequest, out: &mut dyn Write| {
+        |_: gpgme::PassphraseRequest, out: &mut dyn Write| {
             out.write_all(passphrase)?;
             Ok(())
         },

@@ -1,33 +1,25 @@
-use anyhow::{anyhow, Result};
-use notify::{watcher, DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
-use std::fs::File;
-use std::fs::{self, DirEntry};
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::fs::{DirEntry, File};
 use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::channel;
-use std::{collections::HashSet, ffi::OsStr}; // todo crossbeam
-                                             // use std::str::from_utf8;
 use std::time::Duration;
 
-use md5::{Digest, Md5};
-use std::sync::mpsc;
+use anyhow::anyhow;
+use notify::{watcher, DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::gpg::*;
+use filesync::{FileStatus, SyncAction};
+use syncdb::SyncDb;
+use syncentity::SyncEntity;
 
-const DB_FILENAME: &str = ".gpgsyncdb";
-
-use crate::syncdb::*;
-
-use crate::filesync::*;
-
-use crate::syncentity::*;
+mod filesync;
 mod gpg;
 mod syncdb;
 mod syncentity;
 
-mod filesync;
+const DB_FILENAME: &str = ".gpgsyncdb";
 
-fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> Result<()> {
+fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> anyhow::Result<()> {
     if plain_root.starts_with(&gpg_root) || gpg_root.starts_with(&plain_root) {
         return Err(anyhow!("The two paths must not contain each other."));
     }
@@ -44,7 +36,7 @@ fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> Result<()> {
 
 fn visit_dir(dir: &Path, cb: &mut dyn FnMut(&DirEntry)) -> io::Result<()> {
     if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
+        for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
@@ -103,7 +95,9 @@ pub fn push_gpg(se: &SyncEntity, passphrase: &str) {
     crate::gpg::decrypt(&mut gpg_f, &mut plain_f, passphrase.as_bytes()).unwrap();
 }
 pub fn hash_all(p: &mut impl Read) -> io::Result<Vec<u8>> {
-    let mut hasher = Md5::new();
+    use md5::Digest;
+
+    let mut hasher = md5::Md5::new();
 
     let mut buf: [u8; 1024] = [0; 1024];
     loop {
@@ -129,7 +123,7 @@ fn gpg_file_hash(p: &Path, passphrase: &str) -> io::Result<Vec<u8>> {
 
     let mut decrypted = Vec::new();
 
-    decrypt(&mut f, &mut decrypted, passphrase.as_bytes()).unwrap();
+    gpg::decrypt(&mut f, &mut decrypted, passphrase.as_bytes()).unwrap();
 
     //println!("{:?}", from_utf8(&df));
 
@@ -152,9 +146,9 @@ fn analyze_file_and_update_db(db: &mut SyncDb, se: &SyncEntity) -> SyncAction {
     let plain_status_cur = dbg!(file_status(&se.as_plain()));
     let gpg_status_cur = dbg!(file_status(&se.as_gpg()));
 
-    let sync_action = determine_sync_action(
-        determine_file_change(plain_status_prev, plain_status_cur),
-        determine_file_change(gpg_status_prev, gpg_status_cur),
+    let sync_action = filesync::determine_sync_action(
+        filesync::determine_file_change(plain_status_prev, plain_status_cur),
+        filesync::determine_file_change(gpg_status_prev, gpg_status_cur),
     );
 
     db.set_file_status(&se, plain_status_cur, gpg_status_cur);
@@ -214,12 +208,12 @@ pub struct GpgSync {
     plain_root: PathBuf,
     gpg_root: PathBuf,
     passphrase: String,
-    rx: mpsc::Receiver<DebouncedEvent>,
+    rx: std::sync::mpsc::Receiver<DebouncedEvent>,
     _watcher: RecommendedWatcher,
 }
 
 impl GpgSync {
-    pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> Result<Self> {
+    pub fn new(plain_root: &Path, gpg_root: &Path, passphrase: &str) -> anyhow::Result<Self> {
         let plain_root = std::fs::canonicalize(plain_root).unwrap();
         let gpg_root = std::fs::canonicalize(gpg_root).unwrap();
 
@@ -271,7 +265,7 @@ impl GpgSync {
 
         // todo init watcher even before initial sync!
 
-        let (tx, rx) = channel();
+        let (tx, rx) = std::sync::mpsc::channel();
         // TODO move to other thread
         let mut watcher = watcher(tx, Duration::from_secs(1)).unwrap();
 

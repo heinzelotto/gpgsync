@@ -1,11 +1,12 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::filesync::*;
-use crate::syncentity::*;
+use serde::{Deserialize, Serialize};
+
+use crate::filesync::FileStatus;
+use crate::syncentity::SyncEntity;
 
 const DB_VERSION: u32 = 1;
 
