@@ -13,13 +13,9 @@ use structopt::StructOpt;
 
 //use serde::{Deserialize, Serialize};
 
-mod gpg;
 
-mod gpgsync;
-mod syncdb;
-mod syncentity;
 
-mod filesync;
+
 
 #[derive(StructOpt)]
 struct Cli {

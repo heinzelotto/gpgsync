@@ -21,6 +21,11 @@ use crate::syncdb::*;
 use crate::filesync::*;
 
 use crate::syncentity::*;
+mod gpg;
+mod syncdb;
+mod syncentity;
+
+mod filesync;
 
 fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> Result<()> {
     if plain_root.starts_with(&gpg_root) || gpg_root.starts_with(&plain_root) {
