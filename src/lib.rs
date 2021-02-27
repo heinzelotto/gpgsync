@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs::{DirEntry, File};
+//use std::fs::{DirEntry, File};
 use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,6 +13,7 @@ use syncentity::SyncEntity;
 
 mod fileread;
 mod filesync;
+mod fileutils;
 mod gpg;
 mod syncdb;
 mod syncentity;
@@ -68,7 +69,7 @@ impl GpgSync {
         // TODO read .gitignore
 
         let mut ses = HashSet::new();
-        visit_dir(&plain_root, &mut |de| {
+        fileutils::visit_dir(&plain_root, &mut |de| {
             if !is_hidden(&de.path()) {
                 let se = SyncEntity::from_plain(&de.path(), &plain_root, &gpg_root);
                 ses.insert(se);
@@ -77,7 +78,7 @@ impl GpgSync {
             }
         })?;
 
-        visit_dir(&gpg_root, &mut |de| {
+        fileutils::visit_dir(&gpg_root, &mut |de| {
             if !is_hidden(&de.path()) {
                 // TODO enhance ignoring of files
                 if de.path().extension() == Some(OsStr::new("gpg")) {
@@ -144,6 +145,7 @@ impl GpgSync {
                     notify::DebouncedEvent::Rename(p_src, p_dst) => {
                         println!("Rename event, from {:?} to {:?}", p_src, p_dst);
                         // we don't support moving between the two directories
+                        // TODO ?why not
                         if !((p_src.starts_with(&self.plain_root)
                             && p_dst.starts_with(&self.plain_root))
                             || (p_src.starts_with(&self.gpg_root)
@@ -213,32 +215,11 @@ fn validate_args(plain_root: &PathBuf, gpg_root: &PathBuf) -> anyhow::Result<()>
     Ok(())
 }
 
-fn visit_dir(dir: &Path, cb: &mut dyn FnMut(&DirEntry)) -> io::Result<()> {
-    if dir.is_dir() {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                visit_dir(&path, cb)?;
-            } else {
-                cb(&entry);
-            }
-        }
-    }
-    Ok(())
-}
-
-pub fn file_status(fp: &PathBuf) -> io::Result<FileStatus> {
-    if !fp.exists() {
-        return Ok(FileStatus::Nonexistent);
-    }
-
-    let mtime = std::fs::metadata(&fp)?.modified()?;
-    Ok(FileStatus::Existent(mtime))
-}
-
-pub fn file_statuses(se: &SyncEntity) -> io::Result<(FileStatus, FileStatus)> {
-    Ok((file_status(&se.as_plain())?, file_status(&se.as_gpg())?))
+fn file_statuses(se: &SyncEntity) -> io::Result<(FileStatus, FileStatus)> {
+    Ok((
+        fileutils::file_status(&se.as_plain())?,
+        fileutils::file_status(&se.as_gpg())?,
+    ))
 }
 
 pub fn check_coincide(se: &SyncEntity, passphrase: &str) -> bool {
@@ -247,28 +228,24 @@ pub fn check_coincide(se: &SyncEntity, passphrase: &str) -> bool {
     gpg_hash == plain_hash
 }
 
-pub fn push_plain(se: &SyncEntity, passphrase: &str) {
-    let mut plain_f = File::open(&se.as_plain()).unwrap();
+pub fn push_plain(se: &SyncEntity, passphrase: &str) -> io::Result<()> {
+    let mut plain_f = fileutils::open_read(&se.as_plain())?;
 
-    let mut gpg_f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&se.as_gpg())
-        .unwrap();
+    let mut gpg_f = fileutils::open_write(&se.as_gpg())?;
 
-    crate::gpg::encrypt(&mut plain_f, &mut gpg_f, passphrase.as_bytes()).unwrap();
+    crate::gpg::encrypt(&mut plain_f, &mut gpg_f, passphrase.as_bytes())?;
+
+    Ok(())
 }
 
-pub fn push_gpg(se: &SyncEntity, passphrase: &str) {
-    let mut gpg_f = File::open(&se.as_gpg()).unwrap();
+pub fn push_gpg(se: &SyncEntity, passphrase: &str) -> io::Result<()> {
+    let mut gpg_f = fileutils::open_read(&se.as_gpg())?;
 
-    let mut plain_f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&se.as_plain())
-        .unwrap();
+    let mut plain_f = fileutils::open_write(&se.as_plain())?;
 
     crate::gpg::decrypt(&mut gpg_f, &mut plain_f, passphrase.as_bytes()).unwrap();
+
+    Ok(())
 }
 pub fn hash_all(p: &mut impl Read) -> io::Result<Vec<u8>> {
     use md5::Digest;
@@ -289,13 +266,13 @@ pub fn hash_all(p: &mut impl Read) -> io::Result<Vec<u8>> {
 }
 
 pub fn plain_file_hash(p: &Path) -> io::Result<Vec<u8>> {
-    let mut f = File::open(p)?;
+    let mut f = fileutils::open_read(p)?;
 
     hash_all(&mut f)
 }
 
 fn gpg_file_hash(p: &Path, passphrase: &str) -> io::Result<Vec<u8>> {
-    let mut f = File::open(p)?;
+    let mut f = fileutils::open_read(p)?;
 
     let mut decrypted = Vec::new();
 
@@ -307,8 +284,8 @@ fn gpg_file_hash(p: &Path, passphrase: &str) -> io::Result<Vec<u8>> {
 fn analyze_file_and_update_db(db: &mut SyncDb, se: &SyncEntity) -> io::Result<SyncAction> {
     let (plain_status_prev, gpg_status_prev) = db.get_file_status(&se);
 
-    let plain_status_cur = dbg!(file_status(&se.as_plain()))?;
-    let gpg_status_cur = dbg!(file_status(&se.as_gpg()))?;
+    let plain_status_cur = dbg!(fileutils::file_status(&se.as_plain()))?;
+    let gpg_status_cur = dbg!(fileutils::file_status(&se.as_gpg()))?;
 
     let sync_action = filesync::determine_sync_action(
         filesync::determine_file_change(plain_status_prev, plain_status_cur),
@@ -337,13 +314,13 @@ fn perform_sync_action_and_update_db(
             }
         }
         SyncAction::PushPlain => {
-            push_plain(se, passphrase);
+            push_plain(se, passphrase)?;
         }
         SyncAction::DeletePlain => {
             std::fs::remove_file(se.as_plain())?;
         }
         SyncAction::PushGpg => {
-            push_gpg(se, passphrase);
+            push_gpg(se, passphrase)?;
         }
         SyncAction::DeleteGpg => {
             std::fs::remove_file(&se.as_gpg())?;
