@@ -15,9 +15,9 @@ mod fileread;
 mod filesync;
 mod fileutils;
 mod gpg;
+mod notifier;
 mod syncdb;
 mod syncentity;
-mod notifier;
 
 /// File name of the database.  Will be saved inside the plain root directory.
 const DB_FILENAME: &str = ".gpgsyncdb";
