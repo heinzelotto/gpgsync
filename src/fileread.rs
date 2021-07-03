@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use async_std::prelude::*;
 
 async fn r<F, O>(
@@ -27,12 +29,11 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_fileread() -> std::io::Result<()> {
         {
-            let mut file = std::fs::File::create("foo.txt")?;
+            let _file = std::fs::File::create("foo.txt")?;
         }
         let writer = async_std::task::spawn(async {
             for c in 'a'..'z' {
@@ -80,7 +81,7 @@ mod test {
                     c = i;
                     println!("set to {}", i)
                 }
-                Err(e) => panic!(e),
+                Err(e) => panic!("{}", e),
             }
         }
 
