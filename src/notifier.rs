@@ -64,7 +64,8 @@ impl TreeNode {
                 child.clean();
             }
         }
-        // TODO remove deleted subtrees, or better yet, introduce extra function process_dirt()
+        // TODO remove deleted subtrees, or better yet, introduce extra function
+        // process_dirt(). and conflictcopy conflicting subtrees
 
         //     }
         //     TreeNode::File(ref mut dirt) => {
@@ -139,8 +140,6 @@ impl Tree {
     fn clean(&mut self) {
         self.root.clean();
     }
-
-    // TODO we need
 
     fn write(&mut self, path: &Path, mtime: std::time::SystemTime) {
         // TODO recurse?
@@ -239,10 +238,6 @@ fn handle_independently(
         });
 
         match cur.1 {
-            // TODO actually we don't need to delete every file
-            // individually, we can just remove whole subtrees, make
-            // this func return bool that states whether to continue or
-            // break the traversal
             Some(Dirt::Deleted) => {
                 if !other_side_deleted_root.is_some() {
                     ops.push(match tree_type {
@@ -250,6 +245,8 @@ fn handle_independently(
                         TreeType::Plain => FileOperation::DeleteEnc(curpath),
                     });
                 }
+
+                // since we removed the whole subtree, don't recurse here
                 return false;
             }
             Some(Dirt::PathDirt) => {}
@@ -352,6 +349,9 @@ fn calculate_merge_rec(
                         handle_independently(ne, &newpath, ops, TreeType::Encrypted, None);
                     }
                     (Some(Dirt::Deleted), Some(Dirt::PathDirt)) => {
+                        // recurse with the knowledge that the other side is to
+                        // be deleted, i. e. conflictcopy this and delete the
+                        // other
                         handle_independently(
                             np,
                             &newpath,
@@ -359,15 +359,12 @@ fn calculate_merge_rec(
                             TreeType::Plain,
                             Some(&newconflictcopypathp),
                         );
-
-                        ops.push(FileOperation::DeletePlain(PathBuf::from(ke)));
+                        ops.push(FileOperation::DeletePlain(newpath));
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::Deleted)) => {
-                        // TODO recurse with the knowledge that the other side is to be deleted, i. e. conflict
-                        // then DeletePlain np if only the pathdirt on ne only led to other deletions and no modifications
-                        //
-                        // or: have all modifications on ne happen in an alternate conflictcopy path and handle independently
-
+                        // recurse with the knowledge that the other side is to
+                        // be deleted, i. e. conflictcopy this and delete the
+                        // other
                         handle_independently(
                             ne,
                             &newpath,
@@ -375,12 +372,30 @@ fn calculate_merge_rec(
                             TreeType::Encrypted,
                             Some(&newconflictcopypathe),
                         );
-
-                        ops.push(FileOperation::DeleteEnc(PathBuf::from(ke)));
+                        ops.push(FileOperation::DeleteEnc(newpath));
                     }
-                    (Some(Dirt::Modified), Some(Dirt::PathDirt)) => { // TODO analog to the above
+                    (Some(Dirt::Modified), Some(Dirt::PathDirt)) => {
+                        // TODO assumption: can only be adding of this file/directory. changing of file attributes will not trigger this. also, adding a directory full of files will trigger modified dirt for all children.
+                        // handle the pathdirt with a conflictcopy and apply the modification
+                        handle_independently(
+                            np,
+                            &newpath,
+                            ops,
+                            TreeType::Plain,
+                            Some(&newconflictcopypathp),
+                        );
+                        ops.push(FileOperation::Decryption(newpath));
                     }
-                    (Some(Dirt::PathDirt), Some(Dirt::Modified)) => { // TODO analog to the above
+                    (Some(Dirt::PathDirt), Some(Dirt::Modified)) => {
+                        // handle the pathdirt with a conflictcopy and apply the modification
+                        handle_independently(
+                            ne,
+                            &newpath,
+                            ops,
+                            TreeType::Encrypted,
+                            Some(&newconflictcopypathe),
+                        );
+                        ops.push(FileOperation::Encryption(newpath));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Modified)) => {
                         // conflictcopy plain, decrypt enc
@@ -391,10 +406,22 @@ fn calculate_merge_rec(
                         ops.push(FileOperation::Decryption(newpath));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Deleted)) => {
-                        // TODO conflictcopy the modified one and delete the original path, analog to the above
+                        // conflictcopy the modified one and delete the original
+                        // path, analog to the above
+                        ops.push(FileOperation::ConflictCopyEnc(
+                            PathBuf::from(&newpath),
+                            newconflictcopypathe,
+                        ));
+                        ops.push(FileOperation::DeleteEnc(PathBuf::from(&newpath)));
                     }
                     (Some(Dirt::Deleted), Some(Dirt::Modified)) => {
-                        // TODO conflictcopy the modified one and delete the original path, analog to the above
+                        // conflictcopy the modified one and delete the original
+                        // path, analog to the above
+                        ops.push(FileOperation::ConflictCopyPlain(
+                            PathBuf::from(&newpath),
+                            newconflictcopypathp,
+                        ));
+                        ops.push(FileOperation::DeletePlain(PathBuf::from(&newpath)));
                     }
                     (Some(Dirt::Deleted), Some(Dirt::Deleted)) => {
                         // nothing to be done
@@ -676,6 +703,133 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_merge_8() -> anyhow::Result<()> {
+        // pathdirt/del <-> pathdirt/mod (conflicting on same levels)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.delete(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        assert_eq!(
+            calculate_merge(&tree_e, &tree_p),
+            vec![
+                FileOperation::ConflictCopyPlain(
+                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from(format!(
+                        "a/conflict_{}_f1.txt",
+                        t1.duration_since(t0)?.as_secs()
+                    ))
+                ),
+                FileOperation::DeletePlain(PathBuf::from("a/f1.txt")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_9() -> anyhow::Result<()> {
+        // pathdirt/mod <-> pathdirt/del (conflicting on same levels)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.delete(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        assert_eq!(
+            calculate_merge(&tree_e, &tree_p),
+            vec![
+                FileOperation::ConflictCopyEnc(
+                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from(format!(
+                        "a/conflict_{}_f1.txt",
+                        t1.duration_since(t1)?.as_secs()
+                    ))
+                ),
+                FileOperation::DeleteEnc(PathBuf::from("a/f1.txt")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_10() -> anyhow::Result<()> {
+        // mod <-> pathdirt/mod (conflicting on separate levels)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        assert_eq!(
+            calculate_merge(&tree_e, &tree_p),
+            vec![
+                FileOperation::ConflictCopyPlain(
+                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from(format!(
+                        "conflict_{}_a/f1.txt",
+                        t1.duration_since(t0)?.as_secs()
+                    ))
+                ),
+                FileOperation::Decryption(PathBuf::from("a")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_11() -> anyhow::Result<()> {
+        // mod <-> pathdirt/mod (conflicting on separate levels)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a"), t1);
+        dbg!(&tree_p);
+
+        assert_eq!(
+            calculate_merge(&tree_e, &tree_p),
+            vec![
+                FileOperation::ConflictCopyEnc(
+                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from(format!(
+                        "conflict_{}_a/f1.txt",
+                        t1.duration_since(t1)?.as_secs()
+                    ))
+                ),
+                FileOperation::Encryption(PathBuf::from("a")),
+            ]
+        );
+
+        Ok(())
+    }
     // TODO test case where a directory is replaced by a file
     // TODO test case where a dir is deleted but somethin within it then readded
 }
