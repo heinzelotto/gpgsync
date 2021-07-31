@@ -42,7 +42,7 @@ enum Dirt {
 //     Directory(Option<Dirt>, std::collections::HashMap<String, TreeNode>),
 //     File(Option<Dirt>),
 // }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TreeNode(
     std::time::SystemTime,
     Option<Dirt>,
@@ -118,9 +118,30 @@ impl TreeNode {
 
         fun(self);
     }
+
+    fn locate_parent_of<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
+        let segments: Vec<String> = p
+            .iter()
+            .map(|p_elem| p_elem.to_string_lossy().to_string())
+            .collect();
+        let mut n = self;
+        for i in 0..segments.len() {
+            if !n.2.contains_key(&segments[i]) {
+                return None;
+            }
+
+            if i == segments.len() - 1 {
+                return Some(n);
+            }
+
+            n = n.2.get_mut(&segments[i]).unwrap();
+        }
+
+        None
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Tree {
     root: TreeNode,
 }
@@ -165,6 +186,23 @@ impl Tree {
         }
 
         n.1 = Some(Dirt::Modified);
+    }
+
+    // ensure a path exists in the tree without setting any dirt
+    fn create(&mut self, path: &Path, mtime: std::time::SystemTime) {
+        let mut n = &mut self.root;
+
+        n.0 = mtime;
+
+        for segment in path.iter() {
+            // TODO OsStr
+            n = &mut *n
+                .2
+                .entry(segment.to_string_lossy().to_string())
+                .or_insert(TreeNode(mtime, None, std::collections::HashMap::new()));
+
+            n.0 = mtime;
+        }
     }
 
     // TODO not really an mtime
@@ -213,13 +251,54 @@ enum FileOperation {
 }
 
 impl TreeReconciler {
-    fn diff_from_filesystem(t: &mut Tree, subtree_of_interest: &Path) {}
+    fn diff_from_filesystem(t: &mut Tree, subtree_of_interest: &Path) {
+        // TODO implement
+    }
 }
 
 enum TreeType {
     Encrypted,
     Plain,
 }
+
+fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOperation>) {
+    // TODO not in-place?
+    for op in ops.iter() {
+        match op {
+            FileOperation::DeleteEnc(p) => {}
+            FileOperation::DeletePlain(p) => {}
+            FileOperation::Encryption(p) => {}
+            FileOperation::Decryption(p) => {}
+            FileOperation::ConflictCopyEnc(p, q) => {
+                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().2
+                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .clone();
+
+                enc.create(&q, target_node_clone.0);
+                let qnode_parent = enc.root.locate_parent_of(&q).unwrap();
+
+                qnode_parent.2.insert(
+                    q.file_name().unwrap().to_string_lossy().to_string(),
+                    target_node_clone,
+                );
+            }
+            FileOperation::ConflictCopyPlain(p, q) => {
+                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().2
+                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .clone();
+
+                plain.create(&q, target_node_clone.0);
+                let qnode_parent = plain.root.locate_parent_of(&q).unwrap();
+
+                qnode_parent.2.insert(
+                    q.file_name().unwrap().to_string_lossy().to_string(),
+                    target_node_clone,
+                );
+            }
+        }
+    }
+}
+
 fn handle_independently(
     ne: &TreeNode,
     root: &PathBuf,
@@ -271,27 +350,6 @@ fn handle_independently(
 }
 
 fn calculate_merge(enc: &Tree, plain: &Tree) -> Vec<FileOperation> {
-    // if a subtree is dirty in both trees, conflictcopy operations on all
-    // dirty files (always e. g. on the remote/enc tree, i. e. local
-    // modification always wins) within the conflicting subtree.
-    //
-    // A file is a leaf TreeNode.
-    //
-    // ConflictCopy Operations need to add the date to the filename in case
-    // more than one instance of gpgsync conflicts at the same time. (or
-    // else we will have a.txt, a.conflict.txt, a.conflict.conflict.txt
-    // after three iterations, ?which should also be fine)
-    //
-    // It is now the task to determine what to copy on which directory
-    // level.
-    //
-    // both delete: no conflictcopy
-    //
-    // tree1/mod/mod/del/del, tree2/mod/mod/mod/mod: create a conflictcopy
-    // of the topmost del/, then of all
-
-    // if a subtree is dirty in at most one tree then resolve this subtree and its mirror without conflict.
-
     // conflictcopy operations should be performed first, ?but possibly after rename ops
 
     let mut ops = vec![];
@@ -450,7 +508,15 @@ fn calculate_merge_rec(
 #[cfg(test)]
 mod test {
 
-    use super::{calculate_merge, Dirt, FileOperation, Tree, TreeNode};
+    macro_rules! hashmap {
+    ($( $key: expr => $val: expr ),*) => {{
+         let mut map = ::std::collections::HashMap::new();
+         $( map.insert($key, $val); )*
+         map
+    }}
+}
+
+    use super::{calculate_merge, update_trees_with_changes, Dirt, FileOperation, Tree, TreeNode};
 
     use lazy_static::lazy_static;
     use std::io::Write;
@@ -757,7 +823,7 @@ mod test {
                     PathBuf::from("a/f1.txt"),
                     PathBuf::from(format!(
                         "a/conflict_{}_f1.txt",
-                        t1.duration_since(t1)?.as_secs()
+                        t0.duration_since(t0)?.as_secs()
                     ))
                 ),
                 FileOperation::DeleteEnc(PathBuf::from("a/f1.txt")),
@@ -821,7 +887,7 @@ mod test {
                     PathBuf::from("a/f1.txt"),
                     PathBuf::from(format!(
                         "conflict_{}_a/f1.txt",
-                        t1.duration_since(t1)?.as_secs()
+                        t0.duration_since(t0)?.as_secs()
                     ))
                 ),
                 FileOperation::Encryption(PathBuf::from("a")),
@@ -830,6 +896,91 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn test_locate_parent() -> anyhow::Result<()> {
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree = Tree::new();
+        tree.write(&Path::new("a/b/c/d/e/f1.txt"), t0);
+        dbg!(&tree);
+
+        assert_eq!(
+            tree.root.locate_parent_of(&Path::new("a")).cloned(),
+            Some(tree.root.clone())
+        );
+        assert_eq!(
+            tree.root.locate_parent_of(&Path::new("a/b")).cloned(),
+            Some(tree.root.2["a"].clone())
+        );
+        assert_eq!(
+            tree.root
+                .locate_parent_of(&Path::new("a/b/c/d/e/f1.txt"))
+                .cloned(),
+            Some(tree.root.2["a"].2["b"].2["c"].2["d"].2["e"].clone())
+        );
+        assert_eq!(tree.root.locate_parent_of(&Path::new("")).cloned(), None);
+        assert_eq!(tree.root.locate_parent_of(&Path::new("xxx")).cloned(), None);
+        assert_eq!(
+            tree.root.locate_parent_of(&Path::new("a/xxx")).cloned(),
+            None
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_tree_0() -> anyhow::Result<()> {
+        // ConflictCopyEnc (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let conflict_filename = format!("conflict_{}_f1.txt", t0.duration_since(t0)?.as_secs());
+        let conflict_path = format!("a/conflict_{}_f1.txt", t0.duration_since(t0)?.as_secs());
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::ConflictCopyEnc(
+                PathBuf::from("a/f1.txt"),
+                PathBuf::from(&conflict_path),
+            )],
+        );
+
+        assert!(tree_e
+            .root
+            .locate_parent_of(&Path::new(&conflict_path))
+            .is_some());
+
+        let tr = Tree {
+            root: TreeNode(
+                t0,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t0, Some(Dirt::PathDirt), hashmap![
+                        conflict_filename.clone() => TreeNode(t0,Some(Dirt::Modified),hashmap![]),
+                        String::from("f1.txt") => TreeNode(t0, Some(Dirt::Modified), hashmap![])
+                    ])
+                ],
+            ),
+        };
+
+        // dbg!(&tree_e);
+        // dbg!(&tr);
+        assert_eq!(tree_e, tr);
+
+        Ok(())
+    }
+
     // TODO test case where a directory is replaced by a file
     // TODO test case where a dir is deleted but somethin within it then readded
 }
