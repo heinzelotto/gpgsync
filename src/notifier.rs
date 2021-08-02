@@ -981,6 +981,136 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_update_tree_1() -> anyhow::Result<()> {
+        // ConflictCopyPlain (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let conflict_filename = format!("conflict_{}_f1.txt", t1.duration_since(t0)?.as_secs());
+        let conflict_path = format!("a/conflict_{}_f1.txt", t1.duration_since(t0)?.as_secs());
+
+        let mut tree_e = Tree::new();
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::ConflictCopyPlain(
+                PathBuf::from("a/f1.txt"),
+                PathBuf::from(&conflict_path),
+            )],
+        );
+
+        assert!(tree_p
+            .root
+            .locate_parent_of(&Path::new(&conflict_path))
+            .is_some());
+
+        let tr = Tree {
+            root: TreeNode(
+                t1,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t1, Some(Dirt::PathDirt), hashmap![
+                        conflict_filename.clone() => TreeNode(t1,Some(Dirt::Modified),hashmap![]),
+                        String::from("f1.txt") => TreeNode(t1, Some(Dirt::Modified), hashmap![])
+                    ])
+                ],
+            ),
+        };
+
+        // dbg!(&tree_e);
+        // dbg!(&tr);
+        assert_eq!(tree_p, tr);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_tree_2() -> anyhow::Result<()> {
+        // DeleteEnc (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::DeleteEnc(
+                PathBuf::from("a/f1.txt")
+            )],
+        );
+
+        let tr = Tree {
+            root: TreeNode(
+                t0,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t0, Some(Dirt::PathDirt), hashmap![
+                    ])
+                ],
+            ),
+        };
+
+        assert_eq!(tree_e, tr);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_tree_3() -> anyhow::Result<()> {
+        // DeletePlain (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::DeletePlain(
+                PathBuf::from("a/f1.txt")
+            )],
+        );
+
+        let tr = Tree {
+            root: TreeNode(
+                t1,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t1, Some(Dirt::PathDirt), hashmap![
+                    ])
+                ],
+            ),
+        };
+
+        assert_eq!(tree_p, tr);
+
+        Ok(())
+    }
+
+    // TODO conflictcopy more tests
+    // TODO DeleteEnc/Plain non-leaf subdir
+
     // TODO test case where a directory is replaced by a file
     // TODO test case where a dir is deleted but somethin within it then readded
 }
