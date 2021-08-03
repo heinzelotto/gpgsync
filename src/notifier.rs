@@ -1049,9 +1049,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::DeleteEnc(
-                PathBuf::from("a/f1.txt")
-            )],
+            &vec![FileOperation::DeleteEnc(PathBuf::from("a/f1.txt"))],
         );
 
         let tr = Tree {
@@ -1087,9 +1085,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::DeletePlain(
-                PathBuf::from("a/f1.txt")
-            )],
+            &vec![FileOperation::DeletePlain(PathBuf::from("a/f1.txt"))],
         );
 
         let tr = Tree {
@@ -1108,9 +1104,85 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_update_tree_4() -> anyhow::Result<()> {
+        // Encryption (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("a/f1.txt"), t1);
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::Encryption(PathBuf::from("a/f1.txt"))],
+        );
+
+        let tr = Tree {
+            root: TreeNode(
+                t1,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t1, Some(Dirt::PathDirt), hashmap![
+                        String::from("f1.txt") => TreeNode(t1, Some(Dirt::Modified), hashmap![])
+                    ])
+                ],
+            ),
+        };
+
+        assert_eq!(tree_e, tr);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_tree_5() -> anyhow::Result<()> {
+        // Decryption (simple leaf in subdir)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("a/f1.txt"), t0);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        dbg!(&tree_p);
+
+        update_trees_with_changes(
+            &mut tree_e,
+            &mut tree_p,
+            &vec![FileOperation::Decryption(PathBuf::from("a/f1.txt"))],
+        );
+
+        let tr = Tree {
+            root: TreeNode(
+                t0,
+                Some(Dirt::PathDirt),
+                hashmap![String::from("a") => TreeNode(
+                    t0, Some(Dirt::PathDirt), hashmap![
+                        String::from("f1.txt") => TreeNode(t0, Some(Dirt::Modified), hashmap![])
+                    ])
+                ],
+            ),
+        };
+
+        assert_eq!(tree_p, tr);
+
+        Ok(())
+    }
+
     // TODO conflictcopy more tests
     // TODO DeleteEnc/Plain non-leaf subdir
 
     // TODO test case where a directory is replaced by a file
     // TODO test case where a dir is deleted but somethin within it then readded
+
+    // TODO if .gpg is added to files in enc dir, test pseude conflict of dir x and file x(.gpg)
 }
