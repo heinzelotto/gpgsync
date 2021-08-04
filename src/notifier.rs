@@ -265,8 +265,12 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
     // TODO not in-place?
     for op in ops.iter() {
         match op {
-            FileOperation::DeleteEnc(p) => {}
-            FileOperation::DeletePlain(p) => {}
+            FileOperation::DeleteEnc(p) => {
+                enc.root.locate_parent_of(&p).unwrap().2.remove(&p.file_name().unwrap().to_string_lossy().to_string());
+            }
+            FileOperation::DeletePlain(p) => {
+                plain.root.locate_parent_of(&p).unwrap().2.remove(&p.file_name().unwrap().to_string_lossy().to_string());
+            }
             FileOperation::Encryption(p) => {}
             FileOperation::Decryption(p) => {}
             FileOperation::ConflictCopyEnc(p, q) => {
