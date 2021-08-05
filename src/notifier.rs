@@ -43,24 +43,36 @@ enum Dirt {
 //     File(Option<Dirt>),
 // }
 #[derive(Debug, PartialEq, Clone)]
-pub struct TreeNode(
-    std::time::SystemTime,
-    Option<Dirt>,
-    std::collections::HashMap<String, TreeNode>,
-);
+pub struct TreeNode {
+    mtime: std::time::SystemTime, // TODO ?is this even needed
+    dirt: Option<Dirt>,
+    children: std::collections::HashMap<String, TreeNode>,
+}
 
 impl TreeNode {
+    fn new(
+        mtime: std::time::SystemTime, // TODO ?is this even needed
+        dirt: Option<Dirt>,
+        children: std::collections::HashMap<String, TreeNode>,
+    ) -> Self {
+        TreeNode {
+            mtime,
+            dirt,
+            children,
+        }
+    }
+
     fn clean(&mut self) {
         // match self {
         //     TreeNode::Directory(ref mut dirt, ref mut map) => {
-        if self.1.is_some() {
-            self.1 = None;
+        if self.dirt.is_some() {
+            self.dirt = None;
             println!("cleaning");
 
-            for k in self.2.keys() {
+            for k in self.children.keys() {
                 println!("cleaning node {}", k);
             }
-            for child in self.2.values_mut() {
+            for child in self.children.values_mut() {
                 child.clean();
             }
         }
@@ -80,7 +92,7 @@ impl TreeNode {
     {
         fun(self);
 
-        for nb in self.2.values_mut() {
+        for nb in self.children.values_mut() {
             nb.dfs_preorder(fun);
         }
     }
@@ -98,7 +110,7 @@ impl TreeNode {
         F: FnMut(&TreeNode, &Path) -> bool,
     {
         if fun(self, &relpath) {
-            for (nb_name, nb_item) in self.2.iter() {
+            for (nb_name, nb_item) in self.children.iter() {
                 relpath.push(nb_name);
 
                 nb_item.dfs_preorder_path_impl(fun, relpath);
@@ -112,7 +124,7 @@ impl TreeNode {
     where
         F: FnMut(&TreeNode) -> (),
     {
-        for nb in self.2.values() {
+        for nb in self.children.values() {
             nb.dfs_postorder(fun);
         }
 
@@ -126,7 +138,7 @@ impl TreeNode {
             .collect();
         let mut n = self;
         for i in 0..segments.len() {
-            if !n.2.contains_key(&segments[i]) {
+            if !n.children.contains_key(&segments[i]) {
                 return None;
             }
 
@@ -134,7 +146,7 @@ impl TreeNode {
                 return Some(n);
             }
 
-            n = n.2.get_mut(&segments[i]).unwrap();
+            n = n.children.get_mut(&segments[i]).unwrap();
         }
 
         None
@@ -149,7 +161,7 @@ pub struct Tree {
 impl Tree {
     fn new() -> Self {
         Self {
-            root: TreeNode(
+            root: TreeNode::new(
                 std::time::SystemTime::now(),
                 None,
                 std::collections::HashMap::new(),
@@ -167,41 +179,41 @@ impl Tree {
 
         let mut n = &mut self.root;
 
-        n.0 = mtime;
-        n.1 = Some(Dirt::PathDirt);
+        n.mtime = mtime;
+        n.dirt = Some(Dirt::PathDirt);
 
         for segment in path.iter() {
             // TODO OsStr
             n = &mut *n
-                .2
+                .children
                 .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode(
+                .or_insert(TreeNode::new(
                     mtime,
                     Some(Dirt::PathDirt),
                     std::collections::HashMap::new(),
                 ));
 
-            n.0 = mtime;
-            n.1 = Some(Dirt::PathDirt);
+            n.mtime = mtime;
+            n.dirt = Some(Dirt::PathDirt);
         }
 
-        n.1 = Some(Dirt::Modified);
+        n.dirt = Some(Dirt::Modified);
     }
 
     // ensure a path exists in the tree without setting any dirt
     fn create(&mut self, path: &Path, mtime: std::time::SystemTime) {
         let mut n = &mut self.root;
 
-        n.0 = mtime;
+        n.mtime = mtime;
 
         for segment in path.iter() {
             // TODO OsStr
             n = &mut *n
-                .2
+                .children
                 .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode(mtime, None, std::collections::HashMap::new()));
+                .or_insert(TreeNode::new(mtime, None, std::collections::HashMap::new()));
 
-            n.0 = mtime;
+            n.mtime = mtime;
         }
     }
 
@@ -209,27 +221,27 @@ impl Tree {
     fn delete(&mut self, path: &Path, mtime: std::time::SystemTime) {
         let mut n = &mut self.root;
 
-        n.0 = mtime;
-        n.1 = Some(Dirt::PathDirt);
+        n.mtime = mtime;
+        n.dirt = Some(Dirt::PathDirt);
 
         for segment in path.iter() {
             // TODO OsStr
             n = &mut *n
-                .2
+                .children
                 .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode(
+                .or_insert(TreeNode::new(
                     mtime,
                     Some(Dirt::PathDirt),
                     std::collections::HashMap::new(),
                 ));
 
-            n.0 = mtime;
-            n.1 = Some(Dirt::PathDirt);
+            n.mtime = mtime;
+            n.dirt = Some(Dirt::PathDirt);
         }
 
         n.dfs_preorder(&mut |cur: &mut TreeNode| {
-            cur.0 = mtime;
-            cur.1 = Some(Dirt::Deleted);
+            cur.mtime = mtime;
+            cur.dirt = Some(Dirt::Deleted);
         });
     }
 
@@ -266,35 +278,44 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
     for op in ops.iter() {
         match op {
             FileOperation::DeleteEnc(p) => {
-                enc.root.locate_parent_of(&p).unwrap().2.remove(&p.file_name().unwrap().to_string_lossy().to_string());
+                enc.root
+                    .locate_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
             FileOperation::DeletePlain(p) => {
-                plain.root.locate_parent_of(&p).unwrap().2.remove(&p.file_name().unwrap().to_string_lossy().to_string());
+                plain
+                    .root
+                    .locate_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
             FileOperation::Encryption(p) => {}
             FileOperation::Decryption(p) => {}
             FileOperation::ConflictCopyEnc(p, q) => {
-                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().2
+                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                enc.create(&q, target_node_clone.0);
+                enc.create(&q, target_node_clone.mtime);
                 let qnode_parent = enc.root.locate_parent_of(&q).unwrap();
 
-                qnode_parent.2.insert(
+                qnode_parent.children.insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
             FileOperation::ConflictCopyPlain(p, q) => {
-                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().2
+                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                plain.create(&q, target_node_clone.0);
+                plain.create(&q, target_node_clone.mtime);
                 let qnode_parent = plain.root.locate_parent_of(&q).unwrap();
 
-                qnode_parent.2.insert(
+                qnode_parent.children.insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
@@ -320,7 +341,7 @@ fn handle_independently(
             curcopy
         });
 
-        match cur.1 {
+        match cur.dirt {
             Some(Dirt::Deleted) => {
                 if !other_side_deleted_root.is_some() {
                     ops.push(match tree_type {
@@ -372,12 +393,12 @@ fn calculate_merge_rec(
     curpath: &mut PathBuf,
 ) {
     // we currently use a btreeset so that the ordering for the test is deterministic
-    let sete: std::collections::BTreeSet<String> = enc.2.keys().cloned().collect();
-    let setp: std::collections::BTreeSet<String> = plain.2.keys().cloned().collect();
+    let sete: std::collections::BTreeSet<String> = enc.children.keys().cloned().collect();
+    let setp: std::collections::BTreeSet<String> = plain.children.keys().cloned().collect();
 
     for ke in sete.union(&setp) {
         println!("{}", &ke);
-        match (enc.2.get(ke), plain.2.get(ke)) {
+        match (enc.children.get(ke), plain.children.get(ke)) {
             (Some(ne), Some(np)) => {
                 let mut newpath = curpath.clone();
                 newpath.push(ke);
@@ -385,7 +406,8 @@ fn calculate_merge_rec(
                 let mut newconflictcopypathe = curpath.clone();
                 let copykee = format!(
                     "conflict_{}_{}",
-                    ne.0.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    ne.mtime
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .unwrap()
                         .as_secs(),
                     ke
@@ -395,14 +417,15 @@ fn calculate_merge_rec(
                 let mut newconflictcopypathp = curpath.clone();
                 let copykep = format!(
                     "conflict_{}_{}",
-                    np.0.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    np.mtime
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .unwrap()
                         .as_secs(),
                     ke
                 );
                 newconflictcopypathp.push(copykep);
 
-                match dbg!((ne.1, np.1)) {
+                match dbg!((ne.dirt, np.dirt)) {
                     (None, None) => {}
                     (None, Some(_)) => {
                         handle_independently(np, &newpath, ops, TreeType::Plain, None);
@@ -490,7 +513,7 @@ fn calculate_merge_rec(
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::PathDirt)) => {
                         curpath.push(&ke);
-                        calculate_merge_rec(&enc.2[ke], &plain.2[ke], ops, curpath);
+                        calculate_merge_rec(&enc.children[ke], &plain.children[ke], ops, curpath);
                         curpath.pop();
                     }
                 }
@@ -537,22 +560,30 @@ mod test {
         tree.write(&Path::new("sub/dir/file.txt"), t0);
 
         dbg!(&tree);
-        assert_eq!(tree.root.2.len(), 1);
-        assert!(tree.root.2["sub"].2["dir"].2.contains_key("file.txt"));
-        assert_eq!(tree.root.2["sub"].1, Some(Dirt::PathDirt));
-        assert_eq!(tree.root.2["sub"].2["dir"].1, Some(Dirt::PathDirt));
+        assert_eq!(tree.root.children.len(), 1);
+        assert!(tree.root.children["sub"].children["dir"]
+            .children
+            .contains_key("file.txt"));
+        assert_eq!(tree.root.children["sub"].dirt, Some(Dirt::PathDirt));
         assert_eq!(
-            tree.root.2["sub"].2["dir"].2["file.txt"].1,
+            tree.root.children["sub"].children["dir"].dirt,
+            Some(Dirt::PathDirt)
+        );
+        assert_eq!(
+            tree.root.children["sub"].children["dir"].children["file.txt"].dirt,
             Some(Dirt::Modified)
         );
 
         tree.delete(&Path::new("sub/dir"), t1);
 
         dbg!(&tree);
-        assert_eq!(tree.root.2["sub"].1, Some(Dirt::PathDirt));
-        assert_eq!(tree.root.2["sub"].2["dir"].1, Some(Dirt::Deleted));
+        assert_eq!(tree.root.children["sub"].dirt, Some(Dirt::PathDirt));
         assert_eq!(
-            tree.root.2["sub"].2["dir"].2["file.txt"].1,
+            tree.root.children["sub"].children["dir"].dirt,
+            Some(Dirt::Deleted)
+        );
+        assert_eq!(
+            tree.root.children["sub"].children["dir"].children["file.txt"].dirt,
             Some(Dirt::Deleted)
         );
     }
@@ -916,13 +947,16 @@ mod test {
         );
         assert_eq!(
             tree.root.locate_parent_of(&Path::new("a/b")).cloned(),
-            Some(tree.root.2["a"].clone())
+            Some(tree.root.children["a"].clone())
         );
         assert_eq!(
             tree.root
                 .locate_parent_of(&Path::new("a/b/c/d/e/f1.txt"))
                 .cloned(),
-            Some(tree.root.2["a"].2["b"].2["c"].2["d"].2["e"].clone())
+            Some(
+                tree.root.children["a"].children["b"].children["c"].children["d"].children["e"]
+                    .clone()
+            )
         );
         assert_eq!(tree.root.locate_parent_of(&Path::new("")).cloned(), None);
         assert_eq!(tree.root.locate_parent_of(&Path::new("xxx")).cloned(), None);
@@ -966,13 +1000,13 @@ mod test {
             .is_some());
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t0, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode(t0,Some(Dirt::Modified),hashmap![]),
-                        String::from("f1.txt") => TreeNode(t0, Some(Dirt::Modified), hashmap![])
+                        conflict_filename.clone() => TreeNode::new(t0,Some(Dirt::Modified),hashmap![]),
+                        String::from("f1.txt") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
                     ])
                 ],
             ),
@@ -1017,13 +1051,13 @@ mod test {
             .is_some());
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t1, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode(t1,Some(Dirt::Modified),hashmap![]),
-                        String::from("f1.txt") => TreeNode(t1, Some(Dirt::Modified), hashmap![])
+                        conflict_filename.clone() => TreeNode::new(t1,Some(Dirt::Modified),hashmap![]),
+                        String::from("f1.txt") => TreeNode::new(t1, Some(Dirt::Modified), hashmap![])
                     ])
                 ],
             ),
@@ -1057,10 +1091,10 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t0, Some(Dirt::PathDirt), hashmap![
                     ])
                 ],
@@ -1093,10 +1127,10 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t1, Some(Dirt::PathDirt), hashmap![
                     ])
                 ],
@@ -1129,12 +1163,12 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t1, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode(t1, Some(Dirt::Modified), hashmap![])
+                        String::from("f1.txt") => TreeNode::new(t1, Some(Dirt::Modified), hashmap![])
                     ])
                 ],
             ),
@@ -1166,12 +1200,12 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode(
+            root: TreeNode::new(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode(
+                hashmap![String::from("a") => TreeNode::new(
                     t0, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode(t0, Some(Dirt::Modified), hashmap![])
+                        String::from("f1.txt") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
                     ])
                 ],
             ),
