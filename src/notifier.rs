@@ -201,21 +201,21 @@ impl Tree {
     }
 
     // ensure a path exists in the tree without setting any dirt
-    fn create(&mut self, path: &Path, mtime: std::time::SystemTime) {
-        let mut n = &mut self.root;
+    // fn create_nodirt(&mut self, path: &Path, mtime: std::time::SystemTime) {
+    //     let mut n = &mut self.root;
 
-        n.mtime = mtime;
+    //     n.mtime = mtime;
 
-        for segment in path.iter() {
-            // TODO OsStr
-            n = &mut *n
-                .children
-                .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode::new(mtime, None, std::collections::HashMap::new()));
+    //     for segment in path.iter() {
+    //         // TODO OsStr
+    //         n = &mut *n
+    //             .children
+    //             .entry(segment.to_string_lossy().to_string())
+    //             .or_insert(TreeNode::new(mtime, None, std::collections::HashMap::new()));
 
-            n.mtime = mtime;
-        }
-    }
+    //         n.mtime = mtime;
+    //     }
+    // }
 
     // TODO not really an mtime
     fn delete(&mut self, path: &Path, mtime: std::time::SystemTime) {
@@ -292,14 +292,38 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                     .children
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
-            FileOperation::Encryption(p) => {}
-            FileOperation::Decryption(p) => {}
+            FileOperation::Encryption(p) => {
+                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().children
+                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .clone();
+
+                enc.write(&p, target_node_clone.mtime);
+                let encnode_parent = enc.root.locate_parent_of(&p).unwrap();
+
+                encnode_parent.children.insert(
+                    p.file_name().unwrap().to_string_lossy().to_string(),
+                    target_node_clone,
+                );
+            }
+            FileOperation::Decryption(p) => {
+                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().children
+                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .clone();
+
+                plain.write(&p, target_node_clone.mtime);
+                let plainnode_parent = plain.root.locate_parent_of(&p).unwrap();
+
+                plainnode_parent.children.insert(
+                    p.file_name().unwrap().to_string_lossy().to_string(),
+                    target_node_clone,
+                );
+            }
             FileOperation::ConflictCopyEnc(p, q) => {
                 let target_node_clone = enc.root.locate_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                enc.create(&q, target_node_clone.mtime);
+                enc.write(&q, target_node_clone.mtime);
                 let qnode_parent = enc.root.locate_parent_of(&q).unwrap();
 
                 qnode_parent.children.insert(
@@ -312,7 +336,7 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                plain.create(&q, target_node_clone.mtime);
+                plain.write(&q, target_node_clone.mtime);
                 let qnode_parent = plain.root.locate_parent_of(&q).unwrap();
 
                 qnode_parent.children.insert(
