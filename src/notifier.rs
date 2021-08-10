@@ -250,6 +250,11 @@ impl Tree {
     // fn diff(&mut self, other: &Tree) {}
 }
 
+/// When a filesystem notification comes, the current tree gets updated by
+/// diffing it against the filesystem. Files and folders that appeared new in
+/// the file system are added as nodes with the attribute "Modified" and tree
+/// nodes whose corresponding file or folder does not exist get marked as
+/// "Deleted"
 pub struct TreeReconciler {}
 
 #[derive(Debug, Eq, PartialEq)]
@@ -262,15 +267,26 @@ enum FileOperation {
     ConflictCopyPlain(PathBuf, PathBuf), // TODO could be a move but ?how to handle the rename or delete/modify notification from the notifier then
 }
 
-impl TreeReconciler {
-    fn diff_from_filesystem(t: &mut Tree, subtree_of_interest: &Path) {
-        // TODO implement
-    }
-}
-
 enum TreeType {
     Encrypted,
     Plain,
+}
+
+impl TreeReconciler {
+    fn diff_from_filesystem(
+        fs_root: &Path,
+        tr: &mut Tree,
+        subtree_of_interest: &Path,
+        tree_type: TreeType,
+    ) {
+        // TODO strip .gpg from encrypted file names. Ignnore non .gpg files in enc
+
+        let treenode_corresponding_to_subtree = None; // TODO
+        let mut todo: Vec<(Option<&TreeNode>, Option<&Path>)> =
+            vec![(treenode_corresponding_to_subtree, Some(subtree_of_interest))];
+
+        // TODO implement
+    }
 }
 
 fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOperation>) {
