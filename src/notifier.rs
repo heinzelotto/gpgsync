@@ -169,6 +169,12 @@ impl Tree {
         }
     }
 
+    fn with_time(time: &std::time::SystemTime) -> Self {
+        Self {
+            root: TreeNode::new(time.clone(), None, std::collections::HashMap::new()),
+        }
+    }
+
     // TODO name clean_dirt
     fn clean(&mut self) {
         self.root.clean();
@@ -279,7 +285,7 @@ impl TreeReconciler {
         subtree_of_interest: &Path,
         tree_type: TreeType,
     ) {
-        // TODO strip .gpg from encrypted file names. Ignnore non .gpg files in enc
+        // TODO strip .gpg from encrypted file names. Ignore non .gpg files in enc
 
         let treenode_corresponding_to_subtree = None; // TODO
         let mut todo: Vec<(Option<&TreeNode>, Option<&Path>)> =
@@ -583,12 +589,17 @@ mod test {
     }}
 }
 
-    use super::{calculate_merge, update_trees_with_changes, Dirt, FileOperation, Tree, TreeNode};
+    use super::{
+        calculate_merge, update_trees_with_changes, Dirt, FileOperation, Tree, TreeNode,
+        TreeReconciler,
+    };
 
     use lazy_static::lazy_static;
+    use rand::Rng;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
+    use std::{env, fs};
 
     #[test]
     fn test_tree() {
@@ -1263,4 +1274,64 @@ mod test {
     // TODO test case where a dir is deleted but somethin within it then readded
 
     // TODO if .gpg is added to files in enc dir, test pseude conflict of dir x and file x(.gpg)
+
+    fn get_temp_dir() -> anyhow::Result<PathBuf> {
+        let mut rng = rand::thread_rng();
+        let mut dir = env::temp_dir();
+        dir.push(format!("gpgsync_{}", rng.gen::<u32>()));
+
+        fs::create_dir_all(&dir)?;
+
+        Ok(dir)
+    }
+
+    fn make_file(p: &Path, s: &[u8]) -> anyhow::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(p)?;
+        f.write_all(s)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_0() -> anyhow::Result<()> {
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt");
+        make_file(&f1, "test".as_bytes())?;
+
+        let mut tr = Tree::with_time(&t0);
+
+        let subtree_of_interest = Path::new(".");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Plain,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    t0,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        t0, Some(Dirt::Modified), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
 }
