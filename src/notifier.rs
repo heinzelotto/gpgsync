@@ -1297,6 +1297,8 @@ mod test {
 
     #[test]
     fn test_diff_from_filesystem_0() -> anyhow::Result<()> {
+        // test (plain) file on filesystem <-> empty tree
+
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
@@ -1334,4 +1336,136 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn test_diff_from_filesystem_1() -> anyhow::Result<()> {
+        // test (plain) empty filesystem <-> tree with file
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+
+        let mut tr = Tree::with_time(&t0);
+        tr.write(&Path::new("f1.txt"), t0);
+        tr.clean();
+
+        let subtree_of_interest = Path::new(".");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Plain,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    t0,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        t0, Some(Dirt::Deleted), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_2() -> anyhow::Result<()> {
+        // test (plain) file in filesystem <-> tree with older mtime
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt");
+        make_file(&f1, "test".as_bytes())?;
+
+        let mut tr = Tree::with_time(&t0);
+        tr.write(&Path::new("f1.txt"), t0);
+        tr.clean();
+
+        let subtree_of_interest = Path::new(".");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Plain,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    t0,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        t0, Some(Dirt::Modified), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_3() -> anyhow::Result<()> {
+        // test (plain) file in filesystem <-> tree with correct mtime
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt");
+        make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
+
+        let mut tr = Tree::with_time(&t0);
+        tr.write(&Path::new("f1.txt"), f1_mtime);
+        tr.clean();
+
+        let subtree_of_interest = Path::new(".");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Plain,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    t0,
+                    None,
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        t0, None, hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    // TODO files in subdir to test recursive diff
+
+    // TODO helper function that can be parametrized to handle
+    // filesystem/tree/result cases more easily.
 }
