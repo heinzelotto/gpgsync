@@ -304,20 +304,39 @@ enum TreeType {
     Plain,
 }
 
+// TODO ?implement abstract tree-zip parallel iterator of two tree structures
+
 impl TreeReconciler {
+    fn diff_from_filesystem_rec(
+        fs_p: Option<&std::fs::File>,
+        tr_p: Option<&mut TreeNode>,
+        tree_type: TreeType,
+    ) {
+        // TODO implement
+    }
+
     fn diff_from_filesystem(
         fs_root: &Path,
         tr: &mut Tree,
         subtree_of_interest: &Path,
         tree_type: TreeType,
-    ) {
+    ) -> std::io::Result<()> {
         // TODO strip .gpg from encrypted file names. Ignore non .gpg files in enc
 
-        let treenode_corresponding_to_subtree = None; // TODO
-        let mut todo: Vec<(Option<&TreeNode>, Option<&Path>)> =
-            vec![(treenode_corresponding_to_subtree, Some(subtree_of_interest))];
+        let treenode_corresponding_to_subtree = tr.get(&subtree_of_interest);
+        let filesystem_corresponding_to_subtree = if fs_root.join(subtree_of_interest).exists() {
+            Some(std::fs::File::open(fs_root.join(&subtree_of_interest))?)
+        } else {
+            None
+        };
 
-        // TODO implement
+        TreeReconciler::diff_from_filesystem_rec(
+            filesystem_corresponding_to_subtree.as_ref(),
+            treenode_corresponding_to_subtree,
+            tree_type,
+        );
+
+        Ok(())
     }
 }
 
