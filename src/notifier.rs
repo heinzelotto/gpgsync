@@ -131,7 +131,24 @@ impl TreeNode {
         fun(self);
     }
 
-    fn locate_parent_of<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
+    fn get<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
+        let segments: Vec<String> = p
+            .iter()
+            .map(|p_elem| p_elem.to_string_lossy().to_string())
+            .collect();
+        let mut n = self;
+        for i in 0..segments.len() {
+            if !n.children.contains_key(&segments[i]) {
+                return None;
+            }
+
+            n = n.children.get_mut(&segments[i]).unwrap();
+        }
+
+        Some(n)
+    }
+
+    fn get_parent_of<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
         let segments: Vec<String> = p
             .iter()
             .map(|p_elem| p_elem.to_string_lossy().to_string())
@@ -253,6 +270,15 @@ impl Tree {
 
     fn rename(&mut self, path: &Path) {}
 
+    fn get<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
+        self.root.get(p)
+    }
+
+    /// returns the parent of `p`, but only if `p` is present
+    fn get_parent_of<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
+        self.root.get_parent_of(p)
+    }
+
     // fn diff(&mut self, other: &Tree) {}
 }
 
@@ -301,7 +327,7 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
         match op {
             FileOperation::DeleteEnc(p) => {
                 enc.root
-                    .locate_parent_of(&p)
+                    .get_parent_of(&p)
                     .unwrap()
                     .children
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
@@ -309,18 +335,18 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
             FileOperation::DeletePlain(p) => {
                 plain
                     .root
-                    .locate_parent_of(&p)
+                    .get_parent_of(&p)
                     .unwrap()
                     .children
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
             FileOperation::Encryption(p) => {
-                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().children
+                let target_node_clone = plain.root.get_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
                 enc.write(&p, target_node_clone.mtime);
-                let encnode_parent = enc.root.locate_parent_of(&p).unwrap();
+                let encnode_parent = enc.root.get_parent_of(&p).unwrap();
 
                 encnode_parent.children.insert(
                     p.file_name().unwrap().to_string_lossy().to_string(),
@@ -328,12 +354,12 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                 );
             }
             FileOperation::Decryption(p) => {
-                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().children
+                let target_node_clone = enc.root.get_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
                 plain.write(&p, target_node_clone.mtime);
-                let plainnode_parent = plain.root.locate_parent_of(&p).unwrap();
+                let plainnode_parent = plain.root.get_parent_of(&p).unwrap();
 
                 plainnode_parent.children.insert(
                     p.file_name().unwrap().to_string_lossy().to_string(),
@@ -341,12 +367,12 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                 );
             }
             FileOperation::ConflictCopyEnc(p, q) => {
-                let target_node_clone = enc.root.locate_parent_of(&p).unwrap().children
+                let target_node_clone = enc.root.get_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
                 enc.write(&q, target_node_clone.mtime);
-                let qnode_parent = enc.root.locate_parent_of(&q).unwrap();
+                let qnode_parent = enc.root.get_parent_of(&q).unwrap();
 
                 qnode_parent.children.insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
@@ -354,12 +380,12 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                 );
             }
             FileOperation::ConflictCopyPlain(p, q) => {
-                let target_node_clone = plain.root.locate_parent_of(&p).unwrap().children
+                let target_node_clone = plain.root.get_parent_of(&p).unwrap().children
                     [&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
                 plain.write(&q, target_node_clone.mtime);
-                let qnode_parent = plain.root.locate_parent_of(&q).unwrap();
+                let qnode_parent = plain.root.get_parent_of(&q).unwrap();
 
                 qnode_parent.children.insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
@@ -984,7 +1010,7 @@ mod test {
     }
 
     #[test]
-    fn test_locate_parent() -> anyhow::Result<()> {
+    fn test_get_parent() -> anyhow::Result<()> {
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
@@ -993,28 +1019,25 @@ mod test {
         dbg!(&tree);
 
         assert_eq!(
-            tree.root.locate_parent_of(&Path::new("a")).cloned(),
+            tree.root.get_parent_of(&Path::new("a")).cloned(),
             Some(tree.root.clone())
         );
         assert_eq!(
-            tree.root.locate_parent_of(&Path::new("a/b")).cloned(),
+            tree.root.get_parent_of(&Path::new("a/b")).cloned(),
             Some(tree.root.children["a"].clone())
         );
         assert_eq!(
             tree.root
-                .locate_parent_of(&Path::new("a/b/c/d/e/f1.txt"))
+                .get_parent_of(&Path::new("a/b/c/d/e/f1.txt"))
                 .cloned(),
             Some(
                 tree.root.children["a"].children["b"].children["c"].children["d"].children["e"]
                     .clone()
             )
         );
-        assert_eq!(tree.root.locate_parent_of(&Path::new("")).cloned(), None);
-        assert_eq!(tree.root.locate_parent_of(&Path::new("xxx")).cloned(), None);
-        assert_eq!(
-            tree.root.locate_parent_of(&Path::new("a/xxx")).cloned(),
-            None
-        );
+        assert_eq!(tree.root.get_parent_of(&Path::new("")).cloned(), None);
+        assert_eq!(tree.root.get_parent_of(&Path::new("xxx")).cloned(), None);
+        assert_eq!(tree.root.get_parent_of(&Path::new("a/xxx")).cloned(), None);
 
         Ok(())
     }
@@ -1047,7 +1070,7 @@ mod test {
 
         assert!(tree_e
             .root
-            .locate_parent_of(&Path::new(&conflict_path))
+            .get_parent_of(&Path::new(&conflict_path))
             .is_some());
 
         let tr = Tree {
@@ -1098,7 +1121,7 @@ mod test {
 
         assert!(tree_p
             .root
-            .locate_parent_of(&Path::new(&conflict_path))
+            .get_parent_of(&Path::new(&conflict_path))
             .is_some());
 
         let tr = Tree {
