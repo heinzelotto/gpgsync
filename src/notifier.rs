@@ -131,6 +131,17 @@ impl TreeNode {
         fun(self);
     }
 
+    fn dfs_postorder_mut<F>(&mut self, fun: &mut F)
+    where
+        F: FnMut(&mut TreeNode) -> (),
+    {
+        for nb in self.children.values_mut() {
+            nb.dfs_postorder_mut(fun);
+        }
+
+        fun(self);
+    }
+
     fn get<'a>(&'a mut self, p: &Path) -> Option<&'a mut TreeNode> {
         let segments: Vec<String> = p
             .iter()
@@ -204,6 +215,10 @@ impl Tree {
 
         n.mtime = mtime;
         n.dirt = Some(Dirt::PathDirt);
+
+        // TODO only change None dirt to PathDirt, and not Modified or Deleted
+        // this way the filesystem diff with preorder traversal will work
+        // correctly
 
         for segment in path.iter() {
             // TODO OsStr
@@ -299,6 +314,7 @@ enum FileOperation {
     ConflictCopyPlain(PathBuf, PathBuf), // TODO could be a move but ?how to handle the rename or delete/modify notification from the notifier then
 }
 
+#[derive(Clone, Copy)]
 enum TreeType {
     Encrypted,
     Plain,
@@ -308,11 +324,103 @@ enum TreeType {
 
 impl TreeReconciler {
     fn diff_from_filesystem_rec(
-        fs_p: Option<&std::fs::File>,
-        tr_p: Option<&mut TreeNode>,
+        fs_root: &Path,
+        tr: &mut Tree,
+        subtree_of_interest: &Path,
         tree_type: TreeType,
-    ) {
-        // TODO implement
+    ) -> std::io::Result<()> {
+        let filesystem_corresponding_to_subtree = if fs_root.join(subtree_of_interest).exists() {
+            Some(fs_root.join(&subtree_of_interest))
+        } else {
+            None
+        };
+
+        match (
+            filesystem_corresponding_to_subtree,
+            tr.get(&subtree_of_interest).is_some(),
+        ) {
+            (Some(fp), true) => {
+                // TODO file <-> tree with children conflict case => clear tree children
+
+                // TODO filter .gpg (??and ignore upper_lowercase)
+                let set_fs: std::collections::BTreeSet<String> =
+                    std::fs::read_dir(fs_root.join(&fp))?
+                        .map(|entry| {
+                            entry.map(|ok_entry| ok_entry.file_name().to_string_lossy().to_string())
+                        })
+                        .collect::<Result<std::collections::BTreeSet<String>, std::io::Error>>()?;
+
+                let set_tr: std::collections::BTreeSet<String> = tr
+                    .get(&subtree_of_interest)
+                    .unwrap()
+                    .children
+                    .keys()
+                    .cloned()
+                    .collect();
+
+                for existing_child_name in set_fs.union(&set_tr) {
+                    let child_on_fs = if fs_root.join(&existing_child_name).exists() {
+                        Some(fs_root.join(&existing_child_name))
+                    } else {
+                        None
+                    };
+
+                    let mut recurse_necessary = true;
+
+                    {
+                        let tp = tr.get(&subtree_of_interest).unwrap();
+
+                        let child_in_tr = tp
+                            .children
+                            .get(existing_child_name)
+                            .map(|child| child.mtime);
+                        if child_on_fs.is_some() && child_in_tr.is_some() {
+                            let mtime_fs = std::fs::metadata(fs_root.join(&fp))?.modified()?;
+                            if mtime_fs == child_in_tr.unwrap() {
+                                recurse_necessary = false;
+                            } else {
+                                tp.mtime = mtime_fs;
+                            }
+                        }
+                    }
+
+                    if recurse_necessary {
+                        let child_dir = subtree_of_interest.join(existing_child_name);
+
+                        TreeReconciler::diff_from_filesystem_rec(
+                            fs_root, tr, &child_dir, tree_type,
+                        )?;
+                    }
+                }
+
+                // TODO implement
+            }
+            (Some(fp), false) => {
+                let md = std::fs::metadata(&fp)?;
+                tr.write(&subtree_of_interest, md.modified()?);
+
+                if md.is_dir() {
+                    for entry in std::fs::read_dir(&fp)? {
+                        let entry = entry?;
+                        let child_dir = subtree_of_interest.join(entry.file_name());
+
+                        TreeReconciler::diff_from_filesystem_rec(
+                            fs_root, tr, &child_dir, tree_type,
+                        )?;
+                    }
+                }
+            }
+            (None, true) => {
+                tr.get(&subtree_of_interest)
+                    .unwrap()
+                    .dfs_postorder_mut(&mut |n: &mut TreeNode| n.dirt = Some(Dirt::Deleted));
+            }
+            (None, false) => {
+                panic!("illegal diff case")
+            }
+        }
+
+        Ok(())
     }
 
     fn diff_from_filesystem(
@@ -323,18 +431,7 @@ impl TreeReconciler {
     ) -> std::io::Result<()> {
         // TODO strip .gpg from encrypted file names. Ignore non .gpg files in enc
 
-        let treenode_corresponding_to_subtree = tr.get(&subtree_of_interest);
-        let filesystem_corresponding_to_subtree = if fs_root.join(subtree_of_interest).exists() {
-            Some(std::fs::File::open(fs_root.join(&subtree_of_interest))?)
-        } else {
-            None
-        };
-
-        TreeReconciler::diff_from_filesystem_rec(
-            filesystem_corresponding_to_subtree.as_ref(),
-            treenode_corresponding_to_subtree,
-            tree_type,
-        );
+        TreeReconciler::diff_from_filesystem_rec(fs_root, tr, subtree_of_interest, tree_type)?;
 
         Ok(())
     }
@@ -1352,7 +1449,7 @@ mod test {
 
         let mut tr = Tree::with_time(&t0);
 
-        let subtree_of_interest = Path::new(".");
+        let subtree_of_interest = Path::new("");
 
         TreeReconciler::diff_from_filesystem(
             &fs_root,
