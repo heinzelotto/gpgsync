@@ -67,10 +67,10 @@ impl TreeNode {
         //     TreeNode::Directory(ref mut dirt, ref mut map) => {
         if self.dirt.is_some() {
             self.dirt = None;
-            println!("cleaning");
+            println!("cleaning"); // TODO remove
 
             for k in self.children.keys() {
-                println!("cleaning node {}", k);
+                println!("cleaning node {}", k); // TODO remove
             }
             for child in self.children.values_mut() {
                 child.clean();
@@ -379,7 +379,8 @@ impl TreeReconciler {
                             if mtime_fs == child_in_tr.unwrap() {
                                 recurse_necessary = false;
                             } else {
-                                tp.mtime = mtime_fs;
+                                // TODO this depends on write() not overwriting existing dirt
+                                tr.write(&subtree_of_interest.join(&existing_child_name), mtime_fs);
                             }
                         }
                     }
@@ -411,9 +412,21 @@ impl TreeReconciler {
                 }
             }
             (None, true) => {
+                let top_mtime = tr.get(&subtree_of_interest).unwrap().mtime;
+
+                // delete first manually to set pathdirt
+                tr.delete(&subtree_of_interest, top_mtime);
+
+                // TODO once pathdirts are only placed if there is no Dirt yet,
+                // can also just call .delete on every node, but is log more
+                // complex.
+
                 tr.get(&subtree_of_interest)
                     .unwrap()
-                    .dfs_postorder_mut(&mut |n: &mut TreeNode| n.dirt = Some(Dirt::Deleted));
+                    .dfs_postorder_mut(&mut |n: &mut TreeNode| {
+                        n.dirt = Some(Dirt::Deleted);
+                        n.mtime = top_mtime
+                    });
             }
             (None, false) => {
                 panic!("illegal diff case")
@@ -1446,6 +1459,7 @@ mod test {
         let mut f1 = fs_root.clone();
         f1.push("f1.txt");
         make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
 
@@ -1464,10 +1478,10 @@ mod test {
             tr,
             Tree {
                 root: TreeNode::new(
-                    t0,
+                    f1_mtime,
                     Some(Dirt::PathDirt),
                     hashmap![String::from("f1.txt") => TreeNode::new(
-                        t0, Some(Dirt::Modified), hashmap![]
+                        f1_mtime, Some(Dirt::Modified), hashmap![]
                     )]
                 )
             }
@@ -1478,18 +1492,18 @@ mod test {
 
     #[test]
     fn test_diff_from_filesystem_1() -> anyhow::Result<()> {
-        // test (plain) empty filesystem <-> tree with file
+        // test (plain) empty filesystem <-> tree with entry
 
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let fs_root = get_temp_dir()?;
 
-        let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt"), t0);
+        let mut tr = Tree::with_time(&t1);
+        tr.write(&Path::new("f1.txt"), t1);
         tr.clean();
 
-        let subtree_of_interest = Path::new(".");
+        let subtree_of_interest = Path::new("");
 
         TreeReconciler::diff_from_filesystem(
             &fs_root,
@@ -1504,10 +1518,10 @@ mod test {
             tr,
             Tree {
                 root: TreeNode::new(
-                    t0,
+                    t1,
                     Some(Dirt::PathDirt),
                     hashmap![String::from("f1.txt") => TreeNode::new(
-                        t0, Some(Dirt::Deleted), hashmap![]
+                        t1, Some(Dirt::Deleted), hashmap![]
                     )]
                 )
             }
@@ -1527,12 +1541,13 @@ mod test {
         let mut f1 = fs_root.clone();
         f1.push("f1.txt");
         make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
         tr.write(&Path::new("f1.txt"), t0);
         tr.clean();
 
-        let subtree_of_interest = Path::new(".");
+        let subtree_of_interest = Path::new("");
 
         TreeReconciler::diff_from_filesystem(
             &fs_root,
@@ -1547,10 +1562,10 @@ mod test {
             tr,
             Tree {
                 root: TreeNode::new(
-                    t0,
+                    f1_mtime,
                     Some(Dirt::PathDirt),
                     hashmap![String::from("f1.txt") => TreeNode::new(
-                        t0, Some(Dirt::Modified), hashmap![]
+                        f1_mtime, Some(Dirt::Modified), hashmap![]
                     )]
                 )
             }
@@ -1576,7 +1591,7 @@ mod test {
         tr.write(&Path::new("f1.txt"), f1_mtime);
         tr.clean();
 
-        let subtree_of_interest = Path::new(".");
+        let subtree_of_interest = Path::new("");
 
         TreeReconciler::diff_from_filesystem(
             &fs_root,
@@ -1591,10 +1606,10 @@ mod test {
             tr,
             Tree {
                 root: TreeNode::new(
-                    t0,
+                    f1_mtime,
                     None,
                     hashmap![String::from("f1.txt") => TreeNode::new(
-                        t0, None, hashmap![]
+                        f1_mtime, None, hashmap![]
                     )]
                 )
             }
@@ -1602,6 +1617,12 @@ mod test {
 
         Ok(())
     }
+
+    // TODO invalid subdir_of_interest, e. g. "." I think problems arise with
+    // this because we interpret it as a file with name '.' and the fs just
+    // ignores that path component
+
+    // TODO created folder and created child file, ?pathdirt not overwritten
 
     // TODO files in subdir to test recursive diff
 
