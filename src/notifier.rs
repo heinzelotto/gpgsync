@@ -1618,6 +1618,215 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_diff_from_filesystem_4() -> anyhow::Result<()> {
+        // test (enc) file on filesystem <-> empty tree
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt.gpg");
+        make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
+
+        let mut tr = Tree::with_time(&t0);
+
+        let subtree_of_interest = Path::new("");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Encrypted,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    f1_mtime,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_5() -> anyhow::Result<()> {
+        // test (enc) empty filesystem <-> tree with entry
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+
+        let mut tr = Tree::with_time(&t1);
+        tr.write(&Path::new("f1.txt"), t1);
+        tr.clean();
+
+        let subtree_of_interest = Path::new("");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Encrypted,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    t1,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        t1, Some(Dirt::Deleted), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_6() -> anyhow::Result<()> {
+        // test (enc) file in filesystem <-> tree with older mtime
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt.gpg");
+        make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
+
+        let mut tr = Tree::with_time(&t0);
+        tr.write(&Path::new("f1.txt"), t0);
+        tr.clean();
+
+        let subtree_of_interest = Path::new("");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Encrypted,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    f1_mtime,
+                    Some(Dirt::PathDirt),
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_7() -> anyhow::Result<()> {
+        // test (encrypted) file in filesystem <-> tree with correct mtime
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt.gpg");
+        make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
+
+        let mut tr = Tree::with_time(&t0);
+        tr.write(&Path::new("f1.txt"), f1_mtime);
+        tr.clean();
+
+        let subtree_of_interest = Path::new("");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Encrypted,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(
+                    f1_mtime,
+                    None,
+                    hashmap![String::from("f1.txt") => TreeNode::new(
+                        f1_mtime, None, hashmap![]
+                    )]
+                )
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_diff_from_filesystem_8() -> anyhow::Result<()> {
+        // test (encrypted but without .gpg) file in filesystem ignored
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let fs_root = get_temp_dir()?;
+        let mut f1 = fs_root.clone();
+        f1.push("f1.txt.wrongextension");
+        make_file(&f1, "test".as_bytes())?;
+        let f1_mtime = std::fs::metadata(&f1)?.modified()?;
+
+        let mut tr = Tree::with_time(&t0);
+
+        let subtree_of_interest = Path::new("");
+
+        TreeReconciler::diff_from_filesystem(
+            &fs_root,
+            &mut tr,
+            &subtree_of_interest,
+            super::TreeType::Encrypted,
+        );
+
+        std::fs::remove_dir_all(&fs_root);
+
+        assert_eq!(
+            tr,
+            Tree {
+                root: TreeNode::new(f1_mtime, None, hashmap![],)
+            }
+        );
+
+        Ok(())
+    }
+
+    // TODO ignore non-.enc files in enc dir
+
     // TODO invalid subdir_of_interest, e. g. "." I think problems arise with
     // this because we interpret it as a file with name '.' and the fs just
     // ignores that path component
