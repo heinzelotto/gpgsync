@@ -322,6 +322,11 @@ enum TreeType {
 
 // TODO ?implement abstract tree-zip parallel iterator of two tree structures
 
+// ?subtree_of_interest must be a directory, not a file
+
+// TODO what should happen when we have both "/dir/" and "/dir.gpg", they are both represented the same
+// we might have to differentiate between dir treenodes and file treenodes, maybe via putting the
+// children hashmap into an enum TreenodeChildren::{File, Dir<hashmap>}
 impl TreeReconciler {
     fn diff_from_filesystem_rec(
         fs_root: &Path,
