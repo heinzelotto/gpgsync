@@ -46,11 +46,11 @@ enum Dirt {
 pub struct TreeNode {
     mtime: std::time::SystemTime, // TODO ?is this even needed
     dirt: Option<Dirt>,
-    children: std::collections::HashMap<String, TreeNode>,
+    children: Option<std::collections::HashMap<String, TreeNode>>,
 }
 
 impl TreeNode {
-    fn new(
+    fn new_dir(
         mtime: std::time::SystemTime, // TODO ?is this even needed
         dirt: Option<Dirt>,
         children: std::collections::HashMap<String, TreeNode>,
@@ -58,7 +58,18 @@ impl TreeNode {
         TreeNode {
             mtime,
             dirt,
-            children,
+            children: Some(children),
+        }
+    }
+
+    fn new_file(
+        mtime: std::time::SystemTime, // TODO ?is this even needed
+        dirt: Option<Dirt>,
+    ) -> Self {
+        TreeNode {
+            mtime,
+            dirt,
+            children: None,
         }
     }
 
@@ -441,6 +452,10 @@ impl TreeReconciler {
         Ok(())
     }
 
+    /// TODO In the enc dir, files that dont have .gpg ending are ignored. In
+    /// both enc and plain dir, directories that end in .gpg are ignored (for
+    /// now). There should be helper methods to determine the validity of a fs
+    /// object. The tree shall only contain valid things.
     fn diff_from_filesystem(
         fs_root: &Path,
         tr: &mut Tree,
@@ -807,7 +822,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.delete(&Path::new("f1.txt"), t0);
+        tree_e.delete(&Path::new("f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -827,7 +842,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("f1.txt"), t0);
+        tree_e.write(&Path::new("f1.txt.gpg"), t0);
         tree_e.clean();
         dbg!(&tree_e);
 
@@ -837,7 +852,7 @@ mod test {
 
         assert_eq!(
             calculate_merge(&tree_e, &tree_p),
-            vec![FileOperation::DeleteEnc(PathBuf::from("f1.txt"))]
+            vec![FileOperation::DeleteEnc(PathBuf::from("f1.txt.gpg"))]
         );
 
         Ok(())
@@ -851,7 +866,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("f1.txt"), t0);
+        tree_e.write(&Path::new("f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -868,7 +883,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("f1.txt"))
+                FileOperation::Decryption(PathBuf::from("f1.txt.gpg"))
             ]
         );
 
@@ -913,8 +928,8 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
-        tree_e.write(&Path::new("a/f2.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f2.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -932,7 +947,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("a/f1.txt")),
+                FileOperation::Decryption(PathBuf::from("a/f1.txt.gpg")),
                 FileOperation::ConflictCopyPlain(
                     PathBuf::from("a/f2.txt"),
                     PathBuf::from(format!(
@@ -940,7 +955,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("a/f2.txt")),
+                FileOperation::Decryption(PathBuf::from("a/f2.txt.gpg")),
             ]
         );
 
@@ -955,7 +970,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -968,9 +983,9 @@ mod test {
             calculate_merge(&tree_e, &tree_p),
             vec![
                 FileOperation::ConflictCopyEnc(
-                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from("a/f1.txt.gpg"),
                     PathBuf::from(format!(
-                        "conflict_{}_a/f1.txt",
+                        "conflict_{}_a/f1.txt.gpg",
                         t0.duration_since(t0)?.as_secs()
                     ))
                 ),
@@ -989,7 +1004,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         tree_e.clean();
         tree_e.delete(&Path::new("a"), t0);
         dbg!(&tree_e);
@@ -1023,7 +1038,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.delete(&Path::new("a/f1.txt"), t0);
+        tree_e.delete(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1055,7 +1070,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1066,13 +1081,13 @@ mod test {
             calculate_merge(&tree_e, &tree_p),
             vec![
                 FileOperation::ConflictCopyEnc(
-                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from("a/f1.txt.gpg"),
                     PathBuf::from(format!(
-                        "a/conflict_{}_f1.txt",
+                        "a/conflict_{}_f1.txt.gpg",
                         t0.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::DeleteEnc(PathBuf::from("a/f1.txt")),
+                FileOperation::DeleteEnc(PathBuf::from("a/f1.txt.gpg")),
             ]
         );
 
@@ -1119,7 +1134,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1130,9 +1145,9 @@ mod test {
             calculate_merge(&tree_e, &tree_p),
             vec![
                 FileOperation::ConflictCopyEnc(
-                    PathBuf::from("a/f1.txt"),
+                    PathBuf::from("a/f1.txt.gpg"),
                     PathBuf::from(format!(
-                        "conflict_{}_a/f1.txt",
+                        "conflict_{}_a/f1.txt.gpg",
                         t0.duration_since(t0)?.as_secs()
                     ))
                 ),
@@ -1183,11 +1198,11 @@ mod test {
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
-        let conflict_filename = format!("conflict_{}_f1.txt", t0.duration_since(t0)?.as_secs());
-        let conflict_path = format!("a/conflict_{}_f1.txt", t0.duration_since(t0)?.as_secs());
+        let conflict_filename = format!("conflict_{}_f1.txt.gpg", t0.duration_since(t0)?.as_secs());
+        let conflict_path = format!("a/conflict_{}_f1.txt.gpg", t0.duration_since(t0)?.as_secs());
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1197,7 +1212,7 @@ mod test {
             &mut tree_e,
             &mut tree_p,
             &vec![FileOperation::ConflictCopyEnc(
-                PathBuf::from("a/f1.txt"),
+                PathBuf::from("a/f1.txt.gpg"),
                 PathBuf::from(&conflict_path),
             )],
         );
@@ -1214,7 +1229,7 @@ mod test {
                 hashmap![String::from("a") => TreeNode::new(
                     t0, Some(Dirt::PathDirt), hashmap![
                         conflict_filename.clone() => TreeNode::new(t0,Some(Dirt::Modified),hashmap![]),
-                        String::from("f1.txt") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
+                        String::from("f1.txt.gpg") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
                     ])
                 ],
             ),
@@ -1286,7 +1301,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1295,7 +1310,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::DeleteEnc(PathBuf::from("a/f1.txt"))],
+            &vec![FileOperation::DeleteEnc(PathBuf::from("a/f1.txt.gpg"))],
         );
 
         let tr = Tree {
@@ -1395,7 +1410,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1404,7 +1419,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::Decryption(PathBuf::from("a/f1.txt"))],
+            &vec![FileOperation::Decryption(PathBuf::from("a/f1.txt.gpg"))],
         );
 
         let tr = Tree {
@@ -1656,7 +1671,7 @@ mod test {
                 root: TreeNode::new(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
                         f1_mtime, Some(Dirt::Modified), hashmap![]
                     )]
                 )
@@ -1676,7 +1691,7 @@ mod test {
         let fs_root = get_temp_dir()?;
 
         let mut tr = Tree::with_time(&t1);
-        tr.write(&Path::new("f1.txt"), t1);
+        tr.write(&Path::new("f1.txt.gpg"), t1);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1696,7 +1711,7 @@ mod test {
                 root: TreeNode::new(
                     t1,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
                         t1, Some(Dirt::Deleted), hashmap![]
                     )]
                 )
@@ -1720,7 +1735,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt"), t0);
+        tr.write(&Path::new("f1.txt.gpg"), t0);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1740,7 +1755,7 @@ mod test {
                 root: TreeNode::new(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
                         f1_mtime, Some(Dirt::Modified), hashmap![]
                     )]
                 )
@@ -1752,7 +1767,7 @@ mod test {
 
     #[test]
     fn test_diff_from_filesystem_7() -> anyhow::Result<()> {
-        // test (encrypted) file in filesystem <-> tree with correct mtime
+        // test (enc) file in filesystem <-> tree with correct mtime
 
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
@@ -1764,7 +1779,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt"), f1_mtime);
+        tr.write(&Path::new("f1.txt.gpg"), f1_mtime);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1784,7 +1799,7 @@ mod test {
                 root: TreeNode::new(
                     f1_mtime,
                     None,
-                    hashmap![String::from("f1.txt") => TreeNode::new(
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
                         f1_mtime, None, hashmap![]
                     )]
                 )
@@ -1829,6 +1844,8 @@ mod test {
 
         Ok(())
     }
+
+    // TODO more diff from filesystem for enc .gpg handling
 
     // TODO ignore non-.enc files in enc dir
 
