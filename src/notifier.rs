@@ -1,5 +1,6 @@
 #![allow(unused, dead_code)]
 
+use std::os::unix::prelude::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 // #[allow(dead_code)]
@@ -80,11 +81,13 @@ impl TreeNode {
             self.dirt = None;
             println!("cleaning"); // TODO remove
 
-            for k in self.children.keys() {
-                println!("cleaning node {}", k); // TODO remove
-            }
-            for child in self.children.values_mut() {
-                child.clean();
+            if let Some(children) = self.children {
+                for k in children.keys() {
+                    println!("cleaning node {}", k); // TODO remove
+                }
+                for child in children.values_mut() {
+                    child.clean();
+                }
             }
         }
         // TODO remove deleted subtrees, or better yet, introduce extra function
@@ -103,8 +106,10 @@ impl TreeNode {
     {
         fun(self);
 
-        for nb in self.children.values_mut() {
-            nb.dfs_preorder(fun);
+        if let Some(children) = self.children {
+            for nb in children.values_mut() {
+                nb.dfs_preorder(fun);
+            }
         }
     }
 
@@ -121,12 +126,14 @@ impl TreeNode {
         F: FnMut(&TreeNode, &Path) -> bool,
     {
         if fun(self, &relpath) {
-            for (nb_name, nb_item) in self.children.iter() {
-                relpath.push(nb_name);
+            if let Some(children) = self.children {
+                for (nb_name, nb_item) in children.iter() {
+                    relpath.push(nb_name);
 
-                nb_item.dfs_preorder_path_impl(fun, relpath);
+                    nb_item.dfs_preorder_path_impl(fun, relpath);
 
-                relpath.pop();
+                    relpath.pop();
+                }
             }
         }
     }
@@ -135,8 +142,10 @@ impl TreeNode {
     where
         F: FnMut(&TreeNode) -> (),
     {
-        for nb in self.children.values() {
-            nb.dfs_postorder(fun);
+        if let Some(children) = self.children {
+            for nb in children.values() {
+                nb.dfs_postorder(fun);
+            }
         }
 
         fun(self);
@@ -146,8 +155,10 @@ impl TreeNode {
     where
         F: FnMut(&mut TreeNode) -> (),
     {
-        for nb in self.children.values_mut() {
-            nb.dfs_postorder_mut(fun);
+        if let Some(children) = self.children {
+            for nb in children.values_mut() {
+                nb.dfs_postorder_mut(fun);
+            }
         }
 
         fun(self);
@@ -160,11 +171,16 @@ impl TreeNode {
             .collect();
         let mut n = self;
         for i in 0..segments.len() {
-            if !n.children.contains_key(&segments[i]) {
-                return None;
-            }
+            match n.children {
+                Some(children) => {
+                    if !children.contains_key(&segments[i]) {
+                        return None;
+                    }
 
-            n = n.children.get_mut(&segments[i]).unwrap();
+                    n = children.get_mut(&segments[i]).unwrap();
+                }
+                None => return None,
+            }
         }
 
         Some(n)
@@ -177,15 +193,20 @@ impl TreeNode {
             .collect();
         let mut n = self;
         for i in 0..segments.len() {
-            if !n.children.contains_key(&segments[i]) {
-                return None;
-            }
+            match n.children {
+                Some(children) => {
+                    if !children.contains_key(&segments[i]) {
+                        return None;
+                    }
 
-            if i == segments.len() - 1 {
-                return Some(n);
-            }
+                    if i == segments.len() - 1 {
+                        return Some(n);
+                    }
 
-            n = n.children.get_mut(&segments[i]).unwrap();
+                    n = children.get_mut(&segments[i]).unwrap();
+                }
+                None => return None,
+            }
         }
 
         None
@@ -200,7 +221,7 @@ pub struct Tree {
 impl Tree {
     fn new() -> Self {
         Self {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 std::time::SystemTime::now(),
                 None,
                 std::collections::HashMap::new(),
@@ -210,7 +231,7 @@ impl Tree {
 
     fn with_time(time: &std::time::SystemTime) -> Self {
         Self {
-            root: TreeNode::new(time.clone(), None, std::collections::HashMap::new()),
+            root: TreeNode::new_dir(time.clone(), None, std::collections::HashMap::new()),
         }
     }
 
@@ -219,7 +240,7 @@ impl Tree {
         self.root.clean();
     }
 
-    fn write(&mut self, path: &Path, mtime: std::time::SystemTime) {
+    fn write(&mut self, path: &Path, is_dir: bool, mtime: std::time::SystemTime) {
         // TODO recurse?
 
         let mut n = &mut self.root;
@@ -235,8 +256,9 @@ impl Tree {
             // TODO OsStr
             n = &mut *n
                 .children
+                .expect("Tried to write a subdir node where there was an existing file node")
                 .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode::new(
+                .or_insert(TreeNode::new_dir(
                     mtime,
                     Some(Dirt::PathDirt),
                     std::collections::HashMap::new(),
@@ -247,6 +269,10 @@ impl Tree {
         }
 
         n.dirt = Some(Dirt::Modified);
+
+        if !is_dir {
+            n.children = None;
+        }
     }
 
     // ensure a path exists in the tree without setting any dirt
@@ -277,8 +303,9 @@ impl Tree {
             // TODO OsStr
             n = &mut *n
                 .children
+                .expect("Tried to write a subdir node where there was an existing file node")
                 .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode::new(
+                .or_insert(TreeNode::new_dir(
                     mtime,
                     Some(Dirt::PathDirt),
                     std::collections::HashMap::new(),
@@ -352,11 +379,13 @@ impl TreeReconciler {
         };
 
         match (
-            filesystem_corresponding_to_subtree,
+            filesystem_corresponding_to_subtree, // TODO ?"subtree" should be "path", ?could be dir or file
             tr.get(&subtree_of_interest).is_some(),
         ) {
             (Some(fp), true) => {
                 // TODO file <-> tree with children conflict case => clear tree children
+
+                // TODO ?what if fs contains a file and tree a dir. check all the cases, write tests.
 
                 // TODO filter .gpg (??and ignore upper_lowercase)
                 let set_fs: std::collections::BTreeSet<String> =
@@ -370,6 +399,9 @@ impl TreeReconciler {
                     .get(&subtree_of_interest)
                     .unwrap()
                     .children
+                    .expect(
+                        "TODO file <-> tree with children conflict case => ?clear tree children",
+                    )
                     .keys()
                     .cloned()
                     .collect();
@@ -388,15 +420,21 @@ impl TreeReconciler {
 
                         let child_in_tr = tp
                             .children
+                            .expect("TODO currently must be dir")
                             .get(existing_child_name)
                             .map(|child| child.mtime);
                         if child_on_fs.is_some() && child_in_tr.is_some() {
-                            let mtime_fs = std::fs::metadata(fs_root.join(&fp))?.modified()?;
+                            let md = std::fs::metadata(fs_root.join(&fp))?;
+                            let mtime_fs = md.modified()?;
                             if mtime_fs == child_in_tr.unwrap() {
                                 recurse_necessary = false;
                             } else {
                                 // TODO this depends on write() not overwriting existing dirt
-                                tr.write(&subtree_of_interest.join(&existing_child_name), mtime_fs);
+                                tr.write(
+                                    &subtree_of_interest.join(&existing_child_name),
+                                    md.is_dir(),
+                                    mtime_fs,
+                                );
                             }
                         }
                     }
@@ -414,7 +452,7 @@ impl TreeReconciler {
             }
             (Some(fp), false) => {
                 let md = std::fs::metadata(&fp)?;
-                tr.write(&subtree_of_interest, md.modified()?);
+                tr.write(&subtree_of_interest, md.is_dir(), md.modified()?);
 
                 if md.is_dir() {
                     for entry in std::fs::read_dir(&fp)? {
