@@ -81,7 +81,7 @@ impl TreeNode {
             self.dirt = None;
             println!("cleaning"); // TODO remove
 
-            if let Some(children) = self.children {
+            if let Some(children) = &mut self.children {
                 for k in children.keys() {
                     println!("cleaning node {}", k); // TODO remove
                 }
@@ -106,7 +106,7 @@ impl TreeNode {
     {
         fun(self);
 
-        if let Some(children) = self.children {
+        if let Some(children) = &mut self.children {
             for nb in children.values_mut() {
                 nb.dfs_preorder(fun);
             }
@@ -126,7 +126,7 @@ impl TreeNode {
         F: FnMut(&TreeNode, &Path) -> bool,
     {
         if fun(self, &relpath) {
-            if let Some(children) = self.children {
+            if let Some(children) = &self.children {
                 for (nb_name, nb_item) in children.iter() {
                     relpath.push(nb_name);
 
@@ -142,7 +142,7 @@ impl TreeNode {
     where
         F: FnMut(&TreeNode) -> (),
     {
-        if let Some(children) = self.children {
+        if let Some(children) = &self.children {
             for nb in children.values() {
                 nb.dfs_postorder(fun);
             }
@@ -155,7 +155,7 @@ impl TreeNode {
     where
         F: FnMut(&mut TreeNode) -> (),
     {
-        if let Some(children) = self.children {
+        if let Some(children) = &mut self.children {
             for nb in children.values_mut() {
                 nb.dfs_postorder_mut(fun);
             }
@@ -171,7 +171,7 @@ impl TreeNode {
             .collect();
         let mut n = self;
         for i in 0..segments.len() {
-            match n.children {
+            match &mut n.children {
                 Some(children) => {
                     if !children.contains_key(&segments[i]) {
                         return None;
@@ -193,16 +193,23 @@ impl TreeNode {
             .collect();
         let mut n = self;
         for i in 0..segments.len() {
-            match n.children {
+            // TODO the following is currently not beautiful
+
+            match &mut n.children {
                 Some(children) => {
                     if !children.contains_key(&segments[i]) {
                         return None;
                     }
+                }
+                None => return None,
+            }
 
-                    if i == segments.len() - 1 {
-                        return Some(n);
-                    }
+            if i == segments.len() - 1 {
+                return Some(n);
+            }
 
+            match &mut n.children {
+                Some(children) => {
                     n = children.get_mut(&segments[i]).unwrap();
                 }
                 None => return None,
@@ -256,6 +263,7 @@ impl Tree {
             // TODO OsStr
             n = &mut *n
                 .children
+                .as_mut()
                 .expect("Tried to write a subdir node where there was an existing file node")
                 .entry(segment.to_string_lossy().to_string())
                 .or_insert(TreeNode::new_dir(
@@ -303,6 +311,7 @@ impl Tree {
             // TODO OsStr
             n = &mut *n
                 .children
+                .as_mut()
                 .expect("Tried to write a subdir node where there was an existing file node")
                 .entry(segment.to_string_lossy().to_string())
                 .or_insert(TreeNode::new_dir(
@@ -399,6 +408,7 @@ impl TreeReconciler {
                     .get(&subtree_of_interest)
                     .unwrap()
                     .children
+                    .as_mut()
                     .expect(
                         "TODO file <-> tree with children conflict case => ?clear tree children",
                     )
@@ -420,6 +430,7 @@ impl TreeReconciler {
 
                         let child_in_tr = tp
                             .children
+                            .as_mut()
                             .expect("TODO currently must be dir")
                             .get(existing_child_name)
                             .map(|child| child.mtime);
@@ -517,6 +528,8 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                     .get_parent_of(&p)
                     .unwrap()
                     .children
+                    .as_mut()
+                    .unwrap()
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
             FileOperation::DeletePlain(p) => {
@@ -525,56 +538,94 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                     .get_parent_of(&p)
                     .unwrap()
                     .children
+                    .as_mut()
+                    .unwrap()
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
             FileOperation::Encryption(p) => {
-                let target_node_clone = plain.root.get_parent_of(&p).unwrap().children
-                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                let target_node_clone = plain
+                    .root
+                    .get_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .as_mut()
+                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                enc.write(&p, target_node_clone.mtime);
+                enc.write(
+                    &p,
+                    target_node_clone.children.is_some(),
+                    target_node_clone.mtime,
+                );
                 let encnode_parent = enc.root.get_parent_of(&p).unwrap();
 
-                encnode_parent.children.insert(
+                encnode_parent.children.as_mut().unwrap().insert(
                     p.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
             FileOperation::Decryption(p) => {
-                let target_node_clone = enc.root.get_parent_of(&p).unwrap().children
-                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                let target_node_clone = enc
+                    .root
+                    .get_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .as_mut()
+                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                plain.write(&p, target_node_clone.mtime);
+                plain.write(
+                    &p,
+                    target_node_clone.children.is_some(),
+                    target_node_clone.mtime,
+                );
                 let plainnode_parent = plain.root.get_parent_of(&p).unwrap();
 
-                plainnode_parent.children.insert(
+                plainnode_parent.children.as_mut().unwrap().insert(
                     p.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
             FileOperation::ConflictCopyEnc(p, q) => {
-                let target_node_clone = enc.root.get_parent_of(&p).unwrap().children
-                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                let target_node_clone = enc
+                    .root
+                    .get_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .as_mut()
+                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                enc.write(&q, target_node_clone.mtime);
+                enc.write(
+                    &q,
+                    target_node_clone.children.is_some(),
+                    target_node_clone.mtime,
+                );
                 let qnode_parent = enc.root.get_parent_of(&q).unwrap();
 
-                qnode_parent.children.insert(
+                qnode_parent.children.as_mut().unwrap().insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
             FileOperation::ConflictCopyPlain(p, q) => {
-                let target_node_clone = plain.root.get_parent_of(&p).unwrap().children
-                    [&p.file_name().unwrap().to_string_lossy().to_string()]
+                let target_node_clone = plain
+                    .root
+                    .get_parent_of(&p)
+                    .unwrap()
+                    .children
+                    .as_mut()
+                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
-                plain.write(&q, target_node_clone.mtime);
+                plain.write(
+                    &q,
+                    target_node_clone.children.is_some(),
+                    target_node_clone.mtime,
+                );
                 let qnode_parent = plain.root.get_parent_of(&q).unwrap();
 
-                qnode_parent.children.insert(
+                qnode_parent.children.as_mut().unwrap().insert(
                     q.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
@@ -651,13 +702,26 @@ fn calculate_merge_rec(
     ops: &mut Vec<FileOperation>,
     curpath: &mut PathBuf,
 ) {
+    if enc.children.is_none() && plain.children.is_none() {
+        // nothing to do
+        return;
+    } else if enc.children.is_none() ^ plain.children.is_none() {
+        // TODO test case
+        panic!("file <-> directory merge unsupported");
+    }
+
     // we currently use a btreeset so that the ordering for the test is deterministic
-    let sete: std::collections::BTreeSet<String> = enc.children.keys().cloned().collect();
-    let setp: std::collections::BTreeSet<String> = plain.children.keys().cloned().collect();
+    let sete: std::collections::BTreeSet<String> =
+        enc.children.as_ref().unwrap().keys().cloned().collect();
+    let setp: std::collections::BTreeSet<String> =
+        plain.children.as_ref().unwrap().keys().cloned().collect();
 
     for ke in sete.union(&setp) {
         println!("{}", &ke);
-        match (enc.children.get(ke), plain.children.get(ke)) {
+        match (
+            enc.children.as_ref().unwrap().get(ke),
+            plain.children.as_ref().unwrap().get(ke),
+        ) {
             (Some(ne), Some(np)) => {
                 let mut newpath = curpath.clone();
                 newpath.push(ke);
@@ -772,7 +836,17 @@ fn calculate_merge_rec(
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::PathDirt)) => {
                         curpath.push(&ke);
-                        calculate_merge_rec(&enc.children[ke], &plain.children[ke], ops, curpath);
+                        calculate_merge_rec(
+                            &enc.children
+                                .as_ref()
+                                .expect("PathDirt enc node must be directory")[ke],
+                            &plain
+                                .children
+                                .as_ref()
+                                .expect("PathDirt plain node must be directory")[ke],
+                            ops,
+                            curpath,
+                        );
                         curpath.pop();
                     }
                 }
