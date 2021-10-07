@@ -895,33 +895,66 @@ mod test {
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
-        tree.write(&Path::new("sub/dir/file.txt"), t0);
+        tree.write(&Path::new("sub/dir/file.txt"), false, t0);
 
         dbg!(&tree);
-        assert_eq!(tree.root.children.len(), 1);
-        assert!(tree.root.children["sub"].children["dir"]
+        assert_eq!(tree.root.children.as_ref().unwrap().len(), 1);
+        assert!(tree.root.children.as_ref().unwrap()["sub"]
             .children
+            .as_ref()
+            .unwrap()["dir"]
+            .children
+            .as_ref()
+            .unwrap()
             .contains_key("file.txt"));
-        assert_eq!(tree.root.children["sub"].dirt, Some(Dirt::PathDirt));
         assert_eq!(
-            tree.root.children["sub"].children["dir"].dirt,
+            tree.root.children.as_ref().unwrap()["sub"].dirt,
             Some(Dirt::PathDirt)
         );
         assert_eq!(
-            tree.root.children["sub"].children["dir"].children["file.txt"].dirt,
+            tree.root.children.as_ref().unwrap()["sub"]
+                .children
+                .as_ref()
+                .unwrap()["dir"]
+                .dirt,
+            Some(Dirt::PathDirt)
+        );
+        assert_eq!(
+            tree.root.children.as_ref().unwrap()["sub"]
+                .children
+                .as_ref()
+                .unwrap()["dir"]
+                .children
+                .as_ref()
+                .unwrap()["file.txt"]
+                .dirt,
             Some(Dirt::Modified)
         );
 
         tree.delete(&Path::new("sub/dir"), t1);
 
         dbg!(&tree);
-        assert_eq!(tree.root.children["sub"].dirt, Some(Dirt::PathDirt));
         assert_eq!(
-            tree.root.children["sub"].children["dir"].dirt,
+            tree.root.children.as_ref().unwrap()["sub"].dirt,
+            Some(Dirt::PathDirt)
+        );
+        assert_eq!(
+            tree.root.children.as_ref().unwrap()["sub"]
+                .children
+                .as_ref()
+                .unwrap()["dir"]
+                .dirt,
             Some(Dirt::Deleted)
         );
         assert_eq!(
-            tree.root.children["sub"].children["dir"].children["file.txt"].dirt,
+            tree.root.children.as_ref().unwrap()["sub"]
+                .children
+                .as_ref()
+                .unwrap()["dir"]
+                .children
+                .as_ref()
+                .unwrap()["file.txt"]
+                .dirt,
             Some(Dirt::Deleted)
         );
     }
@@ -954,7 +987,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("f1.txt.gpg"), false, t0);
         tree_e.clean();
         dbg!(&tree_e);
 
@@ -978,11 +1011,11 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("f1.txt"), t1);
+        tree_p.write(&Path::new("f1.txt"), false, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1040,13 +1073,13 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
-        tree_e.write(&Path::new("a/f2.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
+        tree_e.write(&Path::new("a/f2.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
-        tree_p.write(&Path::new("a/f2.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
+        tree_p.write(&Path::new("a/f2.txt"), false, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1082,11 +1115,11 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         tree_p.clean();
         tree_p.delete(&Path::new("a"), t1);
         dbg!(&tree_p);
@@ -1116,13 +1149,13 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         tree_e.clean();
         tree_e.delete(&Path::new("a"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1154,7 +1187,7 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1182,7 +1215,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1214,11 +1247,11 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a"), t0);
+        tree_e.write(&Path::new("a"), true, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1246,11 +1279,11 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a"), t1);
+        tree_p.write(&Path::new("a"), true, t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1276,7 +1309,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree = Tree::new();
-        tree.write(&Path::new("a/b/c/d/e/f1.txt"), t0);
+        tree.write(&Path::new("a/b/c/d/e/f1.txt"), false, t0);
         dbg!(&tree);
 
         assert_eq!(
@@ -1285,14 +1318,26 @@ mod test {
         );
         assert_eq!(
             tree.root.get_parent_of(&Path::new("a/b")).cloned(),
-            Some(tree.root.children["a"].clone())
+            Some(tree.root.children.as_ref().unwrap()["a"].clone())
         );
         assert_eq!(
             tree.root
                 .get_parent_of(&Path::new("a/b/c/d/e/f1.txt"))
                 .cloned(),
             Some(
-                tree.root.children["a"].children["b"].children["c"].children["d"].children["e"]
+                tree.root.children.as_ref().unwrap()["a"]
+                    .children
+                    .as_ref()
+                    .unwrap()["b"]
+                    .children
+                    .as_ref()
+                    .unwrap()["c"]
+                    .children
+                    .as_ref()
+                    .unwrap()["d"]
+                    .children
+                    .as_ref()
+                    .unwrap()["e"]
                     .clone()
             )
         );
@@ -1314,7 +1359,7 @@ mod test {
         let conflict_path = format!("a/conflict_{}_f1.txt.gpg", t0.duration_since(t0)?.as_secs());
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1335,13 +1380,13 @@ mod test {
             .is_some());
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
+                hashmap![String::from("a") => TreeNode::new_dir(
                     t0, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode::new(t0,Some(Dirt::Modified),hashmap![]),
-                        String::from("f1.txt.gpg") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
+                        conflict_filename.clone() => TreeNode::new_file(t0,Some(Dirt::Modified)),
+                        String::from("f1.txt.gpg") => TreeNode::new_file(t0, Some(Dirt::Modified))
                     ])
                 ],
             ),
@@ -1368,7 +1413,7 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         update_trees_with_changes(
@@ -1386,13 +1431,13 @@ mod test {
             .is_some());
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
+                hashmap![String::from("a") => TreeNode::new_dir(
                     t1, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode::new(t1,Some(Dirt::Modified),hashmap![]),
-                        String::from("f1.txt") => TreeNode::new(t1, Some(Dirt::Modified), hashmap![])
+                        conflict_filename.clone() => TreeNode::new_file(t1,Some(Dirt::Modified)),
+                        String::from("f1.txt") => TreeNode::new_file(t1, Some(Dirt::Modified))
                     ])
                 ],
             ),
@@ -1413,7 +1458,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1426,12 +1471,11 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
-                    t0, Some(Dirt::PathDirt), hashmap![
-                    ])
+                hashmap![String::from("a") => TreeNode::new_file(
+                    t0, Some(Dirt::PathDirt))
                 ],
             ),
         };
@@ -1452,7 +1496,7 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         update_trees_with_changes(
@@ -1462,12 +1506,12 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
-                    t1, Some(Dirt::PathDirt), hashmap![
-                    ])
+                hashmap![String::from("a") => TreeNode::new_file(
+                    t1, Some(Dirt::PathDirt)
+                    )
                 ],
             ),
         };
@@ -1488,7 +1532,7 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.write(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
         dbg!(&tree_p);
 
         update_trees_with_changes(
@@ -1498,12 +1542,12 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
+                hashmap![String::from("a") => TreeNode::new_dir(
                     t1, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode::new(t1, Some(Dirt::Modified), hashmap![])
+                        String::from("f1.txt") => TreeNode::new_file(t1, Some(Dirt::Modified))
                     ])
                 ],
             ),
@@ -1522,7 +1566,7 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.write(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1535,12 +1579,12 @@ mod test {
         );
 
         let tr = Tree {
-            root: TreeNode::new(
+            root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new(
+                hashmap![String::from("a") => TreeNode::new_dir(
                     t0, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode::new(t0, Some(Dirt::Modified), hashmap![])
+                        String::from("f1.txt") => TreeNode::new_file(t0, Some(Dirt::Modified))
                     ])
                 ],
             ),
@@ -1609,11 +1653,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
-                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    hashmap![String::from("f1.txt") => TreeNode::new_file(
+                        f1_mtime, Some(Dirt::Modified)
                     )]
                 )
             }
@@ -1632,7 +1676,7 @@ mod test {
         let fs_root = get_temp_dir()?;
 
         let mut tr = Tree::with_time(&t1);
-        tr.write(&Path::new("f1.txt"), t1);
+        tr.write(&Path::new("f1.txt"), false, t1);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1649,11 +1693,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     t1,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
-                        t1, Some(Dirt::Deleted), hashmap![]
+                    hashmap![String::from("f1.txt") => TreeNode::new_file(
+                        t1, Some(Dirt::Deleted)
                     )]
                 )
             }
@@ -1676,7 +1720,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt"), t0);
+        tr.write(&Path::new("f1.txt"), false, t0);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1693,11 +1737,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt") => TreeNode::new(
-                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    hashmap![String::from("f1.txt") => TreeNode::new_file(
+                        f1_mtime, Some(Dirt::Modified)
                     )]
                 )
             }
@@ -1720,7 +1764,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt"), f1_mtime);
+        tr.write(&Path::new("f1.txt"), false, f1_mtime);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1737,11 +1781,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     None,
-                    hashmap![String::from("f1.txt") => TreeNode::new(
-                        f1_mtime, None, hashmap![]
+                    hashmap![String::from("f1.txt") => TreeNode::new_file(
+                        f1_mtime, None
                     )]
                 )
             }
@@ -1780,11 +1824,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
-                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
+                        f1_mtime, Some(Dirt::Modified)
                     )]
                 )
             }
@@ -1803,7 +1847,7 @@ mod test {
         let fs_root = get_temp_dir()?;
 
         let mut tr = Tree::with_time(&t1);
-        tr.write(&Path::new("f1.txt.gpg"), t1);
+        tr.write(&Path::new("f1.txt.gpg"), false, t1);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1820,11 +1864,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     t1,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
-                        t1, Some(Dirt::Deleted), hashmap![]
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
+                        t1, Some(Dirt::Deleted)
                     )]
                 )
             }
@@ -1847,7 +1891,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt.gpg"), t0);
+        tr.write(&Path::new("f1.txt.gpg"), false, t0);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1864,11 +1908,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
-                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
-                        f1_mtime, Some(Dirt::Modified), hashmap![]
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
+                        f1_mtime, Some(Dirt::Modified)
                     )]
                 )
             }
@@ -1891,7 +1935,7 @@ mod test {
         let f1_mtime = std::fs::metadata(&f1)?.modified()?;
 
         let mut tr = Tree::with_time(&t0);
-        tr.write(&Path::new("f1.txt.gpg"), f1_mtime);
+        tr.write(&Path::new("f1.txt.gpg"), false, f1_mtime);
         tr.clean();
 
         let subtree_of_interest = Path::new("");
@@ -1908,11 +1952,11 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(
+                root: TreeNode::new_dir(
                     f1_mtime,
                     None,
-                    hashmap![String::from("f1.txt.gpg") => TreeNode::new(
-                        f1_mtime, None, hashmap![]
+                    hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
+                        f1_mtime, None
                     )]
                 )
             }
@@ -1950,7 +1994,7 @@ mod test {
         assert_eq!(
             tr,
             Tree {
-                root: TreeNode::new(f1_mtime, None, hashmap![],)
+                root: TreeNode::new_file(f1_mtime, None)
             }
         );
 
