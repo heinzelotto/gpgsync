@@ -250,6 +250,9 @@ impl Tree {
     fn write(&mut self, path: &Path, is_dir: bool, mtime: std::time::SystemTime) {
         // TODO recurse?
 
+        // TODO If is_dir is false, this will make a file at path, even if it
+        // was a directory before. ?Is this intended.
+
         let mut n = &mut self.root;
 
         n.mtime = mtime;
@@ -264,6 +267,7 @@ impl Tree {
             n = &mut *n
                 .children
                 .as_mut()
+                // TODO ?should we allow this.
                 .expect("Tried to write a subdir node where there was an existing file node")
                 .entry(segment.to_string_lossy().to_string())
                 .or_insert(TreeNode::new_dir(
@@ -276,11 +280,12 @@ impl Tree {
             n.dirt = Some(Dirt::PathDirt);
         }
 
-        n.dirt = Some(Dirt::Modified);
-
         if !is_dir {
+            // assert!(n.children.is_none() || n.children.unwrap().is_empty());
             n.children = None;
         }
+
+        n.dirt = Some(Dirt::Modified);
     }
 
     // ensure a path exists in the tree without setting any dirt
@@ -301,29 +306,32 @@ impl Tree {
     // }
 
     // TODO not really an mtime
-    fn delete(&mut self, path: &Path, mtime: std::time::SystemTime) {
+    fn mark_deleted(&mut self, path: &Path, mtime: std::time::SystemTime) {
+        // The path must be present.
         let mut n = &mut self.root;
 
         n.mtime = mtime;
         n.dirt = Some(Dirt::PathDirt);
+
+        // TODO only change None dirt to PathDirt, and not Modified or Deleted
+        // this way the filesystem diff with preorder traversal will work
+        // correctly
 
         for segment in path.iter() {
             // TODO OsStr
             n = &mut *n
                 .children
                 .as_mut()
+                // TODO ?should we allow this.
                 .expect("Tried to write a subdir node where there was an existing file node")
-                .entry(segment.to_string_lossy().to_string())
-                .or_insert(TreeNode::new_dir(
-                    mtime,
-                    Some(Dirt::PathDirt),
-                    std::collections::HashMap::new(),
-                ));
+                .get_mut(&segment.to_string_lossy().to_string())
+                .unwrap();
 
             n.mtime = mtime;
             n.dirt = Some(Dirt::PathDirt);
         }
 
+        // n.dirt = Some(Dirt::Deleted);
         n.dfs_preorder(&mut |cur: &mut TreeNode| {
             cur.mtime = mtime;
             cur.dirt = Some(Dirt::Deleted);
@@ -480,7 +488,7 @@ impl TreeReconciler {
                 let top_mtime = tr.get(&subtree_of_interest).unwrap().mtime;
 
                 // delete first manually to set pathdirt
-                tr.delete(&subtree_of_interest, top_mtime);
+                tr.mark_deleted(&subtree_of_interest, top_mtime);
 
                 // TODO once pathdirts are only placed if there is no Dirt yet,
                 // can also just call .delete on every node, but is log more
@@ -931,7 +939,7 @@ mod test {
             Some(Dirt::Modified)
         );
 
-        tree.delete(&Path::new("sub/dir"), t1);
+        tree.mark_deleted(&Path::new("sub/dir"), t1);
 
         dbg!(&tree);
         assert_eq!(
@@ -967,11 +975,13 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.delete(&Path::new("f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("f1.txt.gpg"), false, t0);
+        tree_e.mark_deleted(&Path::new("f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.delete(&Path::new("f1.txt"), t1);
+        tree_p.write(&Path::new("f1.txt"), false, t1);
+        tree_p.mark_deleted(&Path::new("f1.txt"), t1);
         dbg!(&tree_p);
 
         assert_eq!(calculate_merge(&tree_e, &tree_p), vec![]);
@@ -992,7 +1002,8 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.delete(&Path::new("f1.txt"), t1);
+        tree_p.write(&Path::new("f1.txt"), false, t1);
+        tree_p.mark_deleted(&Path::new("f1.txt"), t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1121,7 +1132,7 @@ mod test {
         let mut tree_p = Tree::new();
         tree_p.write(&Path::new("a/f1.txt"), false, t1);
         tree_p.clean();
-        tree_p.delete(&Path::new("a"), t1);
+        tree_p.mark_deleted(&Path::new("a"), t1);
         dbg!(&tree_p);
 
         assert_eq!(
@@ -1151,7 +1162,7 @@ mod test {
         let mut tree_e = Tree::new();
         tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
         tree_e.clean();
-        tree_e.delete(&Path::new("a"), t0);
+        tree_e.mark_deleted(&Path::new("a"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1183,7 +1194,8 @@ mod test {
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
 
         let mut tree_e = Tree::new();
-        tree_e.delete(&Path::new("a/f1.txt.gpg"), t0);
+        tree_e.write(&Path::new("a/f1.txt.gpg"), false, t0);
+        tree_e.mark_deleted(&Path::new("a/f1.txt.gpg"), t0);
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
@@ -1219,7 +1231,8 @@ mod test {
         dbg!(&tree_e);
 
         let mut tree_p = Tree::new();
-        tree_p.delete(&Path::new("a/f1.txt"), t1);
+        tree_p.write(&Path::new("a/f1.txt"), false, t1);
+        tree_p.mark_deleted(&Path::new("a/f1.txt"), t1);
         dbg!(&tree_p);
 
         assert_eq!(
