@@ -43,10 +43,19 @@ enum Dirt {
 //     Directory(Option<Dirt>, std::collections::HashMap<String, TreeNode>),
 //     File(Option<Dirt>),
 // }
+
+// TODO could also have treenodeEnc and treenodePlain
+
+// TODO could also store just the filename without .gpg, and forbid a/b.txt/ and
+// a/b.txt.gpg right at filesystem level (with panic) so that ambiguities never
+// reach the tree.
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TreeNode {
     mtime: std::time::SystemTime, // TODO ?is this even needed
     dirt: Option<Dirt>,
+    /// The keys are the path segment names as on the disk. I. e. for the
+    /// encrypted tree there is a .gpg suffix on files.
     children: Option<std::collections::HashMap<String, TreeNode>>,
 }
 
@@ -218,6 +227,23 @@ impl TreeNode {
 
         None
     }
+}
+
+fn add_gpg_suffix(p: &Path) -> PathBuf {
+    let mut p = p.to_path_buf();
+    let mut filename = p.file_name().unwrap().to_string_lossy().to_string();
+    filename.push_str(".gpg");
+    p.pop();
+    p.push(filename);
+    p
+}
+fn remove_gpg_suffix(p: &Path) -> PathBuf {
+    let mut p = p.to_path_buf();
+    let mut filename = p.file_name().unwrap().to_string_lossy().to_string();
+    filename.truncate(filename.len() - 4);
+    p.pop();
+    p.push(filename);
+    p
 }
 
 #[derive(Debug, PartialEq)]
@@ -550,47 +576,61 @@ fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOpe
                     .unwrap()
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
-            FileOperation::Encryption(p) => {
+            FileOperation::Encryption(p_plain) => {
                 let target_node_clone = plain
                     .root
-                    .get_parent_of(&p)
+                    .get_parent_of(&p_plain)
                     .unwrap()
                     .children
                     .as_mut()
-                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .unwrap()[&p_plain.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
+                // add .gpg if it is a file
+                let p_enc = if target_node_clone.children.is_some() {
+                    p_plain.to_path_buf()
+                } else {
+                    add_gpg_suffix(&p_plain)
+                };
+
                 enc.write(
-                    &p,
+                    &p_enc,
                     target_node_clone.children.is_some(),
                     target_node_clone.mtime,
                 );
-                let encnode_parent = enc.root.get_parent_of(&p).unwrap();
+                let encnode_parent = enc.root.get_parent_of(&p_enc).unwrap();
 
                 encnode_parent.children.as_mut().unwrap().insert(
-                    p.file_name().unwrap().to_string_lossy().to_string(),
+                    p_enc.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
-            FileOperation::Decryption(p) => {
+            FileOperation::Decryption(p_enc) => {
                 let target_node_clone = enc
                     .root
-                    .get_parent_of(&p)
+                    .get_parent_of(&p_enc)
                     .unwrap()
                     .children
                     .as_mut()
-                    .unwrap()[&p.file_name().unwrap().to_string_lossy().to_string()]
+                    .unwrap()[&p_enc.file_name().unwrap().to_string_lossy().to_string()]
                     .clone();
 
+                // strip .gpg if it is a file
+                let p_plain = if target_node_clone.children.is_some() {
+                    p_enc.to_path_buf()
+                } else {
+                    remove_gpg_suffix(&p_enc)
+                };
+
                 plain.write(
-                    &p,
+                    &p_plain,
                     target_node_clone.children.is_some(),
                     target_node_clone.mtime,
                 );
-                let plainnode_parent = plain.root.get_parent_of(&p).unwrap();
+                let plainnode_parent = plain.root.get_parent_of(&p_plain).unwrap();
 
                 plainnode_parent.children.as_mut().unwrap().insert(
-                    p.file_name().unwrap().to_string_lossy().to_string(),
+                    p_plain.file_name().unwrap().to_string_lossy().to_string(),
                     target_node_clone,
                 );
             }
@@ -653,6 +693,12 @@ fn handle_independently(
         let mut curpath = root.clone();
         curpath.push(relpath);
 
+        let curpath_enc = if cur.children.is_none() {
+            add_gpg_suffix(&curpath)
+        } else {
+            curpath.clone()
+        };
+
         let mut curpath_conflictcopy = other_side_deleted_root.map(|p: &PathBuf| {
             let mut curcopy = p.clone();
             curcopy.push(relpath);
@@ -661,10 +707,10 @@ fn handle_independently(
 
         match cur.dirt {
             Some(Dirt::Deleted) => {
-                if !other_side_deleted_root.is_some() {
+                if other_side_deleted_root.is_none() {
                     ops.push(match tree_type {
                         TreeType::Encrypted => FileOperation::DeletePlain(curpath),
-                        TreeType::Plain => FileOperation::DeleteEnc(curpath),
+                        TreeType::Plain => FileOperation::DeleteEnc(curpath_enc),
                     });
                 }
 
@@ -673,16 +719,17 @@ fn handle_independently(
             }
             Some(Dirt::PathDirt) => {}
             Some(Dirt::Modified) => {
-                let mut curpath = curpath.clone();
+                // let mut curpath = curpath.clone();
 
                 ops.push(match (other_side_deleted_root.is_some(), &tree_type) {
                     (true, TreeType::Encrypted) => {
+                        // enc tree already contains .gpg endings and so does the curpath_conflictcopy
                         FileOperation::ConflictCopyEnc(curpath, curpath_conflictcopy.unwrap())
                     }
                     (true, TreeType::Plain) => {
                         FileOperation::ConflictCopyPlain(curpath, curpath_conflictcopy.unwrap())
                     }
-                    (false, TreeType::Encrypted) => FileOperation::Decryption(curpath),
+                    (false, TreeType::Encrypted) => FileOperation::Decryption(curpath_enc),
                     (false, TreeType::Plain) => FileOperation::Encryption(curpath),
                 })
             }
@@ -719,20 +766,60 @@ fn calculate_merge_rec(
     }
 
     // we currently use a btreeset so that the ordering for the test is deterministic
-    let sete: std::collections::BTreeSet<String> =
-        enc.children.as_ref().unwrap().keys().cloned().collect();
-    let setp: std::collections::BTreeSet<String> =
-        plain.children.as_ref().unwrap().keys().cloned().collect();
+    // let sete: std::collections::BTreeSet<String> =
+    //     enc.children.as_ref().unwrap().keys().cloned().collect();
+    // let setp: std::collections::BTreeSet<String> =
+    //     plain.children.as_ref().unwrap().keys().cloned().collect();
 
-    for ke in sete.union(&setp) {
-        println!("{}", &ke);
-        match (
-            enc.children.as_ref().unwrap().get(ke),
-            plain.children.as_ref().unwrap().get(ke),
-        ) {
+    // normalized entry name (filenames in enc are stripped of the .gpg suffix) -> original enc entry name
+    let mut subentries: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
+
+    for (k, v) in enc.children.as_ref().unwrap() {
+        if v.children.is_some() {
+            // is a dir. Dirname could theoretically end in .gpg
+            let entry = subentries.entry(k.clone()).or_insert(None);
+            // same normalized entry name must not be set by two different enc entities (b.txt/ + b.txt.gpg)
+            assert!(*entry == None);
+            (*entry) = Some(k.clone());
+        } else {
+            // is a file. ignore files not ending in .gpg
+            if k.ends_with(".gpg") {
+                let non_gpg_filename = {
+                    let mut x = k.clone();
+                    x.truncate(k.len() - 4);
+                    x
+                };
+                // same normalized entry name must not be set by two different enc entities (b.txt/ + b.txt.gpg)
+                let entry = subentries.entry(non_gpg_filename).or_insert(None);
+                assert!(*entry == None);
+                (*entry) = Some(k.clone());
+            }
+        }
+    }
+
+    for (k, v) in plain.children.as_ref().unwrap() {
+        subentries.entry(k.clone()).or_insert((None));
+    }
+
+    for (ke_normalized, original_ke_enc) in subentries {
+        println!("current ke: {}", &ke_normalized);
+        // retrieve possibly ke with added
+        match dbg!((
+            original_ke_enc.as_ref().and_then(|enc_entry| enc
+                .children
+                .as_ref()
+                .unwrap()
+                .get(enc_entry)),
+            plain.children.as_ref().unwrap().get(&ke_normalized),
+        )) {
             (Some(ne), Some(np)) => {
-                let mut newpath = curpath.clone();
-                newpath.push(ke);
+                let original_ke_enc = original_ke_enc.unwrap();
+
+                let mut newpathe = curpath.clone();
+                newpathe.push(&original_ke_enc);
+                let mut newpathp = curpath.clone();
+                newpathp.push(&ke_normalized);
 
                 let mut newconflictcopypathe = curpath.clone();
                 let copykee = format!(
@@ -741,7 +828,7 @@ fn calculate_merge_rec(
                         .duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .unwrap()
                         .as_secs(),
-                    ke
+                    &original_ke_enc
                 );
                 newconflictcopypathe.push(copykee);
 
@@ -752,17 +839,18 @@ fn calculate_merge_rec(
                         .duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .unwrap()
                         .as_secs(),
-                    ke
+                    &ke_normalized
                 );
                 newconflictcopypathp.push(copykep);
 
                 match dbg!((ne.dirt, np.dirt)) {
                     (None, None) => {}
                     (None, Some(_)) => {
-                        handle_independently(np, &newpath, ops, TreeType::Plain, None);
+                        println!("bla");
+                        handle_independently(np, &newpathp, ops, TreeType::Plain, None);
                     }
                     (Some(_), None) => {
-                        handle_independently(ne, &newpath, ops, TreeType::Encrypted, None);
+                        handle_independently(ne, &newpathe, ops, TreeType::Encrypted, None);
                     }
                     (Some(Dirt::Deleted), Some(Dirt::PathDirt)) => {
                         // recurse with the knowledge that the other side is to
@@ -770,12 +858,13 @@ fn calculate_merge_rec(
                         // other
                         handle_independently(
                             np,
-                            &newpath,
+                            &newpathp,
                             ops,
                             TreeType::Plain,
                             Some(&newconflictcopypathp),
                         );
-                        ops.push(FileOperation::DeletePlain(newpath));
+                        println!("ops1");
+                        ops.push(FileOperation::DeletePlain(newpathp));
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::Deleted)) => {
                         // recurse with the knowledge that the other side is to
@@ -783,75 +872,80 @@ fn calculate_merge_rec(
                         // other
                         handle_independently(
                             ne,
-                            &newpath,
+                            &newpathe,
                             ops,
                             TreeType::Encrypted,
                             Some(&newconflictcopypathe),
                         );
-                        ops.push(FileOperation::DeleteEnc(newpath));
+                        println!("ops2");
+                        ops.push(FileOperation::DeleteEnc(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::PathDirt)) => {
                         // TODO assumption: can only be adding of this file/directory. changing of file attributes will not trigger this. also, adding a directory full of files will trigger modified dirt for all children.
                         // handle the pathdirt with a conflictcopy and apply the modification
                         handle_independently(
                             np,
-                            &newpath,
+                            &newpathp,
                             ops,
                             TreeType::Plain,
                             Some(&newconflictcopypathp),
                         );
-                        ops.push(FileOperation::Decryption(newpath));
+                        ops.push(FileOperation::Decryption(newpathp));
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::Modified)) => {
                         // handle the pathdirt with a conflictcopy and apply the modification
                         handle_independently(
                             ne,
-                            &newpath,
+                            &newpathe,
                             ops,
                             TreeType::Encrypted,
                             Some(&newconflictcopypathe),
                         );
-                        ops.push(FileOperation::Encryption(newpath));
+                        ops.push(FileOperation::Encryption(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Modified)) => {
                         // conflictcopy plain, decrypt enc
                         ops.push(FileOperation::ConflictCopyPlain(
-                            newpath.clone(),
+                            newpathp.clone(),
                             newconflictcopypathp,
                         ));
-                        ops.push(FileOperation::Decryption(newpath));
+                        ops.push(FileOperation::Decryption(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Deleted)) => {
                         // conflictcopy the modified one and delete the original
                         // path, analog to the above
                         ops.push(FileOperation::ConflictCopyEnc(
-                            PathBuf::from(&newpath),
+                            PathBuf::from(&newpathe),
                             newconflictcopypathe,
                         ));
-                        ops.push(FileOperation::DeleteEnc(PathBuf::from(&newpath)));
+                        println!("ops3");
+                        ops.push(FileOperation::DeleteEnc(PathBuf::from(&newpathe)));
                     }
                     (Some(Dirt::Deleted), Some(Dirt::Modified)) => {
                         // conflictcopy the modified one and delete the original
                         // path, analog to the above
                         ops.push(FileOperation::ConflictCopyPlain(
-                            PathBuf::from(&newpath),
+                            PathBuf::from(&newpathp),
                             newconflictcopypathp,
                         ));
-                        ops.push(FileOperation::DeletePlain(PathBuf::from(&newpath)));
+                        println!("ops4");
+                        ops.push(FileOperation::DeletePlain(PathBuf::from(&newpathp)));
                     }
                     (Some(Dirt::Deleted), Some(Dirt::Deleted)) => {
                         // nothing to be done
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::PathDirt)) => {
-                        curpath.push(&ke);
+                        // in this case we have a dir and ke_normalized == original_ke_enc
+                        assert!(ke_normalized == original_ke_enc);
+                        curpath.push(&ke_normalized);
                         calculate_merge_rec(
                             &enc.children
                                 .as_ref()
-                                .expect("PathDirt enc node must be directory")[ke],
+                                .expect("PathDirt enc node must be directory")[&original_ke_enc],
                             &plain
                                 .children
                                 .as_ref()
-                                .expect("PathDirt plain node must be directory")[ke],
+                                .expect("PathDirt plain node must be directory")[&ke_normalized],
                             ops,
                             curpath,
                         );
@@ -1487,8 +1581,8 @@ mod test {
             root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new_file(
-                    t0, Some(Dirt::PathDirt))
+                hashmap![String::from("a") => TreeNode::new_dir(
+                    t0, Some(Dirt::PathDirt), hashmap![])
                 ],
             ),
         };
@@ -1522,8 +1616,8 @@ mod test {
             root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
-                hashmap![String::from("a") => TreeNode::new_file(
-                    t1, Some(Dirt::PathDirt)
+                hashmap![String::from("a") => TreeNode::new_dir(
+                    t1, Some(Dirt::PathDirt), hashmap![]
                     )
                 ],
             ),
@@ -1560,7 +1654,7 @@ mod test {
                 Some(Dirt::PathDirt),
                 hashmap![String::from("a") => TreeNode::new_dir(
                     t1, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode::new_file(t1, Some(Dirt::Modified))
+                        String::from("f1.txt.gpg") => TreeNode::new_file(t1, Some(Dirt::Modified))
                     ])
                 ],
             ),
@@ -1603,7 +1697,7 @@ mod test {
             ),
         };
 
-        assert_eq!(tree_p, tr);
+        assert_eq!(dbg!(tree_p), dbg!(tr));
 
         Ok(())
     }
@@ -2028,4 +2122,7 @@ mod test {
 
     // TODO helper function that can be parametrized to handle
     // filesystem/tree/result cases more easily.
+
+    // TODO test where a/b.txt.gpg is deleted and then instantly after a/b.txt/
+    // is created (i. e. it is file replaced by dir)
 }
