@@ -395,7 +395,7 @@ enum FileOperation {
     ConflictCopyPlain(PathBuf, PathBuf), // TODO could be a move but ?how to handle the rename or delete/modify notification from the notifier then
 }
 
-#[derive(Clone, Copy)]
+#[derive(PartialEq, Clone, Copy)]
 enum TreeType {
     Encrypted,
     Plain,
@@ -403,7 +403,7 @@ enum TreeType {
 
 // TODO ?implement abstract tree-zip parallel iterator of two tree structures
 
-// ?subtree_of_interest must be a directory, not a file
+// TODO ?subtree_of_interest must be a directory, not a file. Not sure
 
 // TODO what should happen when we have both "/dir/" and "/dir.gpg", they are both represented the same
 // we might have to differentiate between dir treenodes and file treenodes, maybe via putting the
@@ -431,8 +431,24 @@ impl TreeReconciler {
                 // TODO ?what if fs contains a file and tree a dir. check all the cases, write tests.
 
                 // TODO filter .gpg (??and ignore upper_lowercase)
+                // TODO currently seems like there subtree_of_interest should be a dir
                 let set_fs: std::collections::BTreeSet<String> =
                     std::fs::read_dir(fs_root.join(&fp))?
+                        // .filter(|entry| {
+                        //     entry.as_ref().map(
+                        //         |ok_entry| ok_entry.metadata().map(|md| !md.is_dir())
+                        //     ).unwrap_or(Ok(true)).unwrap_or(true) && ok_entry.map(file)
+                        // })
+                        .filter(|entry| {
+                            tree_type == TreeType::Plain
+                                || entry.as_ref().map_or(true, |ok_entry| {
+                                    !(ok_entry.metadata().map_or(true, |md| !md.is_dir())
+                                        && ok_entry
+                                            .path()
+                                            .extension()
+                                            .map_or(true, |ext| !ext.eq("gpg")))
+                                })
+                        })
                         .map(|entry| {
                             entry.map(|ok_entry| ok_entry.file_name().to_string_lossy().to_string())
                         })
@@ -545,7 +561,7 @@ impl TreeReconciler {
         subtree_of_interest: &Path,
         tree_type: TreeType,
     ) -> std::io::Result<()> {
-        // TODO strip .gpg from encrypted file names. Ignore non .gpg files in enc
+        // TODO Ignore non .gpg files in enc
 
         TreeReconciler::diff_from_filesystem_rec(fs_root, tr, subtree_of_interest, tree_type)?;
 
@@ -805,14 +821,12 @@ fn calculate_merge_rec(
     for (ke_normalized, original_ke_enc) in subentries {
         println!("current ke: {}", &ke_normalized);
         // retrieve possibly ke with added
-        match dbg!((
-            original_ke_enc.as_ref().and_then(|enc_entry| enc
-                .children
+        match (
+            original_ke_enc
                 .as_ref()
-                .unwrap()
-                .get(enc_entry)),
+                .and_then(|enc_entry| enc.children.as_ref().unwrap().get(enc_entry)),
             plain.children.as_ref().unwrap().get(&ke_normalized),
-        )) {
+        ) {
             (Some(ne), Some(np)) => {
                 let original_ke_enc = original_ke_enc.unwrap();
 
@@ -843,7 +857,7 @@ fn calculate_merge_rec(
                 );
                 newconflictcopypathp.push(copykep);
 
-                match dbg!((ne.dirt, np.dirt)) {
+                match (ne.dirt, np.dirt) {
                     (None, None) => {}
                     (None, Some(_)) => {
                         println!("bla");
@@ -1720,6 +1734,12 @@ mod test {
         Ok(dir)
     }
 
+    fn make_dir(p: &Path, s: &[u8]) -> anyhow::Result<()> {
+        fs::create_dir_all(&p)?;
+
+        Ok(())
+    }
+
     fn make_file(p: &Path, s: &[u8]) -> anyhow::Result<()> {
         let mut f = std::fs::OpenOptions::new()
             .create_new(true)
@@ -1758,8 +1778,8 @@ mod test {
         std::fs::remove_dir_all(&fs_root);
 
         assert_eq!(
-            tr,
-            Tree {
+            dbg!(tr),
+            dbg!(Tree {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
@@ -1767,7 +1787,7 @@ mod test {
                         f1_mtime, Some(Dirt::Modified)
                     )]
                 )
-            }
+            })
         );
 
         Ok(())
@@ -2099,14 +2119,16 @@ mod test {
         std::fs::remove_dir_all(&fs_root);
 
         assert_eq!(
-            tr,
-            Tree {
-                root: TreeNode::new_file(f1_mtime, None)
-            }
+            dbg!(tr),
+            dbg!(Tree {
+                root: TreeNode::new_dir(t0, None, hashmap![])
+            })
         );
 
         Ok(())
     }
+
+    // TODO diff from filesystem directory handling, conflict between file and directory
 
     // TODO more diff from filesystem for enc .gpg handling
 
