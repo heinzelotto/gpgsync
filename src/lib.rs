@@ -15,7 +15,7 @@ mod fileread;
 mod filesync;
 mod fileutils;
 mod gpg;
-mod notifier;
+mod rewrite;
 mod syncdb;
 mod syncentity;
 
