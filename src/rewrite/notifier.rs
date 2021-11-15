@@ -10,7 +10,7 @@ pub struct Notifier {
 }
 
 impl Notifier {
-    fn new(root: &Path) -> anyhow::Result<Self> {
+    pub fn new(root: &Path) -> anyhow::Result<Self> {
         use notify::Watcher;
 
         let (tx, rx) = std::sync::mpsc::channel();

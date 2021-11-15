@@ -34,3 +34,48 @@ mod update;
 
 // TODO test where a/b.txt.gpg is deleted and then instantly after a/b.txt/
 // is created (i. e. it is file replaced by dir)
+
+/// The GPGsync instance.
+pub struct GpgSync {
+    /// The sync database is persisted in the `plain_root` across program runs.
+    // db: SyncDb,
+    /// Full path where the DB is stored.
+    // db_path: PathBuf,
+    /// Directory containing all unencrypted files.
+    plain_root: std::path::PathBuf,
+    /// Directory containing all encrypted files.
+    gpg_root: std::path::PathBuf,
+    /// Passphrase used for all encryption.
+    passphrase: String,
+    /// Plain tree
+    plain_tree: tree::Tree,
+    /// Encrypted tree
+    gpg_tree: tree::Tree,
+    /// The file watcher.
+    plain_watcher: notifier::Notifier,
+    /// The file watcher.
+    gpg_watcher: notifier::Notifier,
+}
+
+impl GpgSync {
+    fn new(
+        plain_root: std::path::PathBuf,
+        gpg_root: std::path::PathBuf,
+        passphrase: String,
+    ) -> anyhow::Result<Self> {
+        let plain_watcher = notifier::Notifier::new(&plain_root)?;
+        let gpg_watcher = notifier::Notifier::new(&gpg_root)?;
+
+        Ok(GpgSync {
+            plain_root,
+            gpg_root,
+            passphrase,
+            plain_tree: tree::Tree::new(),
+            gpg_tree: tree::Tree::new(),
+            plain_watcher,
+            gpg_watcher,
+        })
+    }
+}
+
+fn run_gpgsync() {}

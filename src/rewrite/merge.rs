@@ -2,10 +2,9 @@ use std::os::unix::prelude::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::rewrite::fs_utils::{add_gpg_suffix, remove_gpg_suffix};
 use crate::rewrite::diff::{FileOperation, TreeType};
+use crate::rewrite::fs_utils::{add_gpg_suffix, remove_gpg_suffix};
 use crate::rewrite::tree::{Dirt, Tree, TreeNode};
-
 
 fn handle_independently(
     ne: &TreeNode,
