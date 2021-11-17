@@ -78,4 +78,31 @@ impl GpgSync {
     }
 }
 
-fn run_gpgsync() {}
+fn run_gpgsync() {
+    // we create a new gpgsync and then, in a loop:
+    //
+    // retrieve events (and print them to get a feel for them)
+    //
+    // store only the paths involved in the events in a set
+    //
+    // after a debounce period of 1.2s of no events, process all entries
+    //
+    // deduplicate them by sorting and folding, removing paths where a
+    // prefixpath is also present
+    //
+    // call treediff for both trees and respective modified paths
+    //
+    // repeat another round of treediffs if new events came in in the meantime
+    //
+    // perform the merge of the trees, keeping the old trees for now
+    //
+    // repeat redo treediffs if new ones came in. (?maybe also redoing all the
+    // tree diffs for paths that are prefixes of newly modified paths)
+    //
+    // redo the whole merge
+    //
+    // pray that nothing changes now: perform all file operations and update
+    // trees.
+    //
+    // done. and repeat waiting for new events.
+}
