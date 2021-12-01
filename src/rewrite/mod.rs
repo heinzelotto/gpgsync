@@ -1,5 +1,7 @@
 #![allow(unused, dead_code)]
 
+use anyhow::bail;
+
 mod diff;
 mod fs_utils;
 mod merge;
@@ -58,51 +60,77 @@ pub struct GpgSync {
 }
 
 impl GpgSync {
-    fn new(
-        plain_root: std::path::PathBuf,
-        gpg_root: std::path::PathBuf,
-        passphrase: String,
+    pub fn new(
+        plain_root: &std::path::Path,
+        gpg_root: &std::path::Path,
+        passphrase: &str,
     ) -> anyhow::Result<Self> {
         let plain_watcher = notifier::Notifier::new(&plain_root)?;
         let gpg_watcher = notifier::Notifier::new(&gpg_root)?;
 
         Ok(GpgSync {
-            plain_root,
-            gpg_root,
-            passphrase,
+            plain_root: plain_root.to_owned(),
+            gpg_root: gpg_root.to_owned(),
+            passphrase: passphrase.to_owned(),
             plain_tree: tree::Tree::new(),
             gpg_tree: tree::Tree::new(),
             plain_watcher,
             gpg_watcher,
         })
     }
-}
 
-fn run_gpgsync() {
-    // we create a new gpgsync and then, in a loop:
-    //
-    // retrieve events (and print them to get a feel for them)
-    //
-    // store only the paths involved in the events in a set
-    //
-    // after a debounce period of 1.2s of no events, process all entries
-    //
-    // deduplicate them by sorting and folding, removing paths where a
-    // prefixpath is also present
-    //
-    // call treediff for both trees and respective modified paths
-    //
-    // repeat another round of treediffs if new events came in in the meantime
-    //
-    // perform the merge of the trees, keeping the old trees for now
-    //
-    // repeat redo treediffs if new ones came in. (?maybe also redoing all the
-    // tree diffs for paths that are prefixes of newly modified paths)
-    //
-    // redo the whole merge
-    //
-    // pray that nothing changes now: perform all file operations and update
-    // trees.
-    //
-    // done. and repeat waiting for new events.
+    pub fn try_process_events(&mut self) -> anyhow::Result<()> {
+        // we create a new gpgsync and then, in a loop:
+        //
+        // retrieve events (and print them to get a feel for them)
+        //
+        // store only the paths involved in the events in a set
+        //
+        // after a debounce period of 1.2s of no events, process all entries
+        //
+        // deduplicate them by sorting and folding, removing paths where a
+        // prefixpath is also present
+        //
+        // call treediff for both trees and respective modified paths
+        //
+        // repeat another round of treediffs if new events came in in the meantime
+        //
+        // perform the merge of the trees, keeping the old trees for now
+        //
+        // repeat redo treediffs if new ones came in. (?maybe also redoing all the
+        // tree diffs for paths that are prefixes of newly modified paths)
+        //
+        // redo the whole merge
+        //
+        // pray that nothing changes now: perform all file operations and update
+        // trees.
+        //
+        // done. and repeat waiting for new events.
+
+        for plain_event in self.plain_watcher.rx.try_iter() {
+            dbg!(plain_event);
+            // TODO add to plain path set
+        }
+
+        for gpg_event in self.gpg_watcher.rx.try_iter() {
+            dbg!(gpg_event);
+            // TODO add to enc path set
+        }
+
+        // loop {
+        //     let received_result = gpgsync.plain_watcher.rx.try_recv();
+        //     if let Result::Err(err) = received_result {
+        //         match err {
+        //             std::sync::mpsc::TryRecvError::Empty => break,
+        //             std::sync::mpsc::TryRecvError::Disconnected => return anyhow::bail!("channel unexpectedly disconnected"),
+        //         }
+        //     }
+
+        //     let received = received_result.ok().unwrap();
+
+        //     dbg!(received);
+        // }
+
+        Ok(())
+    }
 }

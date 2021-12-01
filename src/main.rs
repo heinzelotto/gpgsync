@@ -27,10 +27,26 @@ fn desktop_notify(msg: &str) {
 fn main() {
     let args = Cli::from_args();
 
-    match gpgsync::GpgSync::new(&args.plain_root, &args.gpg_root, &args.passphrase) {
+    // match gpgsync::GpgSync::new(&args.plain_root, &args.gpg_root, &args.passphrase) {
+    //     Ok(mut gpg_sync) => loop {
+    //         if let anyhow::Result::Err(e) =
+    //             gpg_sync.try_process_events(std::time::Duration::new(1, 0))
+    //         {
+    //             println!("{:?}", e);
+    //             desktop_notify(&e.to_string());
+    //             break;
+    //         }
+    //     },
+    //     Err(e) => {
+    //         println!("{:?}", e);
+    //         desktop_notify(&e.to_string());
+    //     }
+    // }
+
+    match gpgsync::rewrite::GpgSync::new(&args.plain_root, &args.gpg_root, &args.passphrase) {
         Ok(mut gpg_sync) => loop {
-            if let anyhow::Result::Err(e) =
-                gpg_sync.try_process_events(std::time::Duration::new(1, 0))
+            if let anyhow::Result::Err(e) = gpg_sync.try_process_events()
+            //std::time::Duration::new(1, 0))
             {
                 println!("{:?}", e);
                 desktop_notify(&e.to_string());
