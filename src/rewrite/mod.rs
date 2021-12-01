@@ -6,6 +6,7 @@ mod diff;
 mod fs_utils;
 mod merge;
 mod notifier;
+mod path_aggregator;
 mod tree;
 mod update;
 
