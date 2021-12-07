@@ -1,4 +1,4 @@
-struct PathAggregator(Vec<std::path::PathBuf>);
+pub struct PathAggregator(Vec<std::path::PathBuf>);
 
 impl PathAggregator {
     pub fn new() -> Self {

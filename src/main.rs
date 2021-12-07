@@ -44,15 +44,19 @@ fn main() {
     // }
 
     match gpgsync::rewrite::GpgSync::new(&args.plain_root, &args.gpg_root, &args.passphrase) {
-        Ok(mut gpg_sync) => loop {
-            if let anyhow::Result::Err(e) = gpg_sync.try_process_events()
-            //std::time::Duration::new(1, 0))
-            {
-                println!("{:?}", e);
-                desktop_notify(&e.to_string());
-                break;
+        Ok(mut gpg_sync) => {
+            gpg_sync.init();
+            loop {
+                if let anyhow::Result::Err(e) =
+                    gpg_sync.try_process_events(std::time::Duration::from_millis(20000))
+                //std::time::Duration::new(1, 0))
+                {
+                    println!("{:?}", e);
+                    desktop_notify(&e.to_string());
+                    break;
+                }
             }
-        },
+        }
         Err(e) => {
             println!("{:?}", e);
             desktop_notify(&e.to_string());

@@ -63,7 +63,7 @@ fn handle_independently(
     });
 }
 
-fn calculate_merge(enc: &Tree, plain: &Tree) -> Vec<FileOperation> {
+pub fn calculate_merge(enc: &Tree, plain: &Tree) -> Vec<FileOperation> {
     // conflictcopy operations should be performed first, ?but possibly after rename ops
 
     let mut ops = vec![];

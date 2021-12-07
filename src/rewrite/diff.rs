@@ -179,7 +179,7 @@ impl TreeReconciler {
     /// both enc and plain dir, directories that end in .gpg are ignored (for
     /// now). There should be helper methods to determine the validity of a fs
     /// object. The tree shall only contain valid things.
-    fn diff_from_filesystem(
+    pub fn diff_from_filesystem(
         fs_root: &Path,
         tr: &mut Tree,
         subtree_of_interest: &Path,

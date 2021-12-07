@@ -2,7 +2,7 @@ use super::fs_utils::{add_gpg_suffix, remove_gpg_suffix};
 use crate::rewrite::diff::FileOperation;
 use crate::rewrite::tree::{Dirt, Tree, TreeNode};
 
-fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOperation>) {
+pub fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<FileOperation>) {
     // TODO not in-place?
     for op in ops.iter() {
         match op {
