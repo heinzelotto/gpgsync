@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub fn add_gpg_suffix(p: &Path) -> PathBuf {
+    dbg!(&p);
     let mut p = p.to_path_buf();
     let mut filename = p.file_name().unwrap().to_string_lossy().to_string();
     filename.push_str(".gpg");

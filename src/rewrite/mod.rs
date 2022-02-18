@@ -209,36 +209,40 @@ impl GpgSync {
         let mut plain_path_aggregator = path_aggregator::PathAggregator::new();
         let mut enc_path_aggregator = path_aggregator::PathAggregator::new();
 
-        loop {
-            self.mark_all_notified_paths(
-                &mut plain_path_aggregator,
-                &mut enc_path_aggregator,
-                timeout,
-            );
-            self.diff_with_aggregator(&mut plain_path_aggregator, &mut enc_path_aggregator);
+        // TODO: maybe readd the loop later, it is there to incrementally collect changes in the pathbuf while the initial filesystem ops might still be in progress
+        //loop {
+        self.mark_all_notified_paths(
+            &mut plain_path_aggregator,
+            &mut enc_path_aggregator,
+            timeout,
+        );
+        self.diff_with_aggregator(&mut plain_path_aggregator, &mut enc_path_aggregator);
 
-            if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
-                println!("new notify events arrived while preparing filesystem diff, discarding and reprocessing...");
-                continue;
-            }
-
-            dbg!(&self.plain_tree);
-            dbg!(&self.enc_tree);
-
-            let file_ops = merge::calculate_merge(&self.enc_tree, &self.plain_tree);
-
-            if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
-                println!("new notify events arrived while preparing filesystem operations, discarding and reprocessing...");
-                continue;
-            }
-
-            println!("From now on there must be no additional user caused filesystem accesses. Starting file system modifications");
-            dbg!(&file_ops);
-
-            // TODO: perform fs ops
-
-            update::update_trees_with_changes(&mut self.enc_tree, &mut self.plain_tree, &file_ops);
+        if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
+            println!("new notify events arrived while preparing filesystem diff, discarding and reprocessing...");
+            return Ok(());
+            // continue;
         }
+
+        dbg!(&self.plain_tree);
+        dbg!(&self.enc_tree);
+
+        let file_ops = merge::calculate_merge(&self.enc_tree, &self.plain_tree);
+
+        if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
+            println!("new notify events arrived while preparing filesystem operations, discarding and reprocessing...");
+            return Ok(());
+            // continue;
+        }
+
+        println!("From now on there must be no additional user caused filesystem accesses. Starting file system modifications");
+        dbg!(&file_ops);
+
+        // TODO: perform fs ops
+        // TODO: make 100% sure that file ops can only touch files beneath the two dirs. I don't want to accidentally rm -rf / just because an empty path snuck in there.
+
+        update::update_trees_with_changes(&mut self.enc_tree, &mut self.plain_tree, &file_ops);
+        //}
 
         // for plain_event in self.plain_watcher.rx.try_iter() {
         //     dbg!(plain_event);
@@ -265,5 +269,200 @@ impl GpgSync {
         // }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::GpgSync;
+
+    use lazy_static::lazy_static;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    fn poll_predicate(p: &mut dyn FnMut() -> bool, timeout: Duration) {
+        let mut remaining = Some(timeout);
+        let decrement = Duration::new(0, 3_000_000);
+        loop {
+            if let Some(rem) = remaining {
+                remaining = rem.checked_sub(decrement);
+            } else {
+                break;
+            }
+
+            if p() {
+                return;
+            }
+
+            std::thread::sleep(decrement);
+        }
+        panic!("predicate did not evaluate to true within {:?}", timeout);
+    }
+
+    lazy_static! {
+        static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
+        static ref GPG_ROOT: &'static Path = &Path::new("./gpg_root");
+    }
+
+    fn test_roots(test_name: &str) -> (PathBuf, PathBuf) {
+        (PLAIN_ROOT.join(test_name), GPG_ROOT.join(test_name))
+    }
+
+    fn init_dir(p: &Path) -> anyhow::Result<()> {
+        if p.exists() {
+            std::fs::remove_dir_all(&p)?;
+        }
+        std::fs::create_dir_all(&p)?;
+
+        Ok(())
+    }
+
+    fn init_dirs(pr: &Path, gr: &Path) {
+        init_dir(pr);
+        init_dir(gr);
+    }
+
+    fn make_file(p: &Path, s: &[u8]) -> anyhow::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(p)?;
+        f.write_all(s)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_creation_failure() {
+        // TODO one dir is inside the other
+
+        // TODO dir doesn't exist
+    }
+
+    #[test]
+    fn test_basic() -> anyhow::Result<()> {
+        let (pr, gr) = test_roots("test_basic");
+
+        // PD/notes.txt -> GD/notes.txt.gpg
+        {
+            init_dirs(&pr, &gr);
+            make_file(&pr.join("notes.txt"), b"hello");
+            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            gpgs.init();
+            gpgs.try_process_events(std::time::Duration::from_secs(2))?;
+            assert!(gr.join("notes.txt.gpg").exists());
+        }
+
+        // GD/notes.txt.gpg -> PD/notes.txt
+        {
+            init_dirs(&pr, &gr);
+            make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            gpgs.init();
+            gpgs.try_process_events(std::time::Duration::from_secs(2))?;
+            assert!(pr.join("notes.txt").exists());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_wrong_passphrase() {
+        let (pr, gr) = test_roots("test_wrong_passphrase");
+        init_dirs(&pr, &gr);
+        make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+        let _gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
+    }
+
+    #[test]
+    fn test_directory_deletion() {
+        // TODO PLAIN_ROOT gets deleted
+        // TODO GPG_ROOT gets deleted
+    }
+
+    #[test]
+    fn test_conflict() {
+        // all of this logic is supposed to be tested in filesync
+
+        // TODO panic when both are changed/added/modified and incompatible
+        // TODO do nothing when both are changed/added/modified but the same
+    }
+
+    #[test]
+    fn test_graceful_conflict() {
+        // TODO Add plain + Del gpg -> pushplain
+    }
+
+    #[test]
+    fn test_rename() -> anyhow::Result<()> {
+        // TODO check failure when the target file exists
+        // TODO check that moving from one directory into the other is not allowed
+        let (pr, gr) = test_roots("test_rename");
+
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+        let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+        assert!(gr.join("notes.txt.gpg").exists());
+
+        std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt"))?;
+
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::new(0, 200_000_000))
+                    .unwrap();
+
+                !gr.join("notes.txt.gpg").exists() && gr.join("notes_renamed.txt.gpg").exists()
+            },
+            Duration::new(2, 0),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_running_sync() -> anyhow::Result<()> {
+        let (pr, gr) = test_roots("test_running_sync");
+
+        init_dirs(&pr, &gr);
+        let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+
+        assert!(!gr.join("notes.txt.gpg").exists());
+
+        make_file(&pr.join("notes.txt"), b"hello");
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::new(0, 200_000_000))
+                    .unwrap();
+
+                gr.join("notes.txt.gpg").exists()
+            },
+            Duration::new(2, 0),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_database() {
+        // TODO do some syncs, quit, modify plain, start again, and no conflict but pushplain should happen!
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_changed_gpgroot() {
+        let (pr, gr) = test_roots("test_changed_gpgroot");
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+        let gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
+        assert!(gr.join("notes.txt.gpg").exists());
+        std::mem::drop(gpgs);
+
+        let (_, gr2) = test_roots("test_changed_gpgroot2");
+        init_dir(&gr2);
+        // pr is already initialized to dir `pr`, trying to connect it to enc dir `gr2` shall fail
+        let _gpgs = GpgSync::new(&pr, &gr2, "test").unwrap();
     }
 }

@@ -13,10 +13,17 @@ fn handle_independently(
     tree_type: TreeType,
     other_side_deleted_root: Option<&PathBuf>,
 ) {
+    dbg!(&ne, &root, &ops, &tree_type, &other_side_deleted_root);
     ne.dfs_preorder_path(&mut |cur: &TreeNode, relpath: &Path| {
-        let mut curpath = root.clone();
-        curpath.push(relpath);
+        let mut curpath = dbg!(root.clone());
+        if relpath != PathBuf::new() {
+            // Don't push the empty path. That would just add an unneeded directory delimiter and break it if curpath is a file.
+            curpath.push(relpath); // relpath might be empty
+        }
 
+        // TODO first check if we are children and if we are enc. Then add
+
+        dbg!(&cur, &relpath, &curpath);
         let curpath_enc = if cur.children.is_none() {
             add_gpg_suffix(&curpath)
         } else {
@@ -129,12 +136,14 @@ fn calculate_merge_rec(
     for (ke_normalized, original_ke_enc) in subentries {
         println!("current ke: {}", &ke_normalized);
         // retrieve possibly ke with added
-        match (
-            original_ke_enc
+        match (dbg!(
+            original_ke_enc.as_ref().and_then(|enc_entry| enc
+                .children
                 .as_ref()
-                .and_then(|enc_entry| enc.children.as_ref().unwrap().get(enc_entry)),
+                .unwrap()
+                .get(enc_entry)),
             plain.children.as_ref().unwrap().get(&ke_normalized),
-        ) {
+        )) {
             (Some(ne), Some(np)) => {
                 let original_ke_enc = original_ke_enc.unwrap();
 
@@ -276,10 +285,17 @@ fn calculate_merge_rec(
                 }
             }
             (None, Some(np)) => {
-                handle_independently(np, &curpath, ops, TreeType::Plain, None);
+                let mut newpathp = curpath.clone();
+                newpathp.push(&ke_normalized);
+
+                handle_independently(np, &newpathp, ops, TreeType::Plain, None);
             }
             (Some(ne), None) => {
-                handle_independently(ne, &curpath, ops, TreeType::Encrypted, None);
+                let original_ke_enc = original_ke_enc.unwrap();
+                let mut newpathe = curpath.clone();
+                newpathe.push(&original_ke_enc);
+
+                handle_independently(ne, &newpathe, ops, TreeType::Encrypted, None);
             }
             (None, None) => {
                 panic!("illegal, one should have been present");

@@ -106,6 +106,7 @@ impl TreeNode {
     where
         F: FnMut(&TreeNode, &Path) -> bool,
     {
+        dbg!(&self);
         if fun(self, &relpath) {
             if let Some(children) = &self.children {
                 for (nb_name, nb_item) in children.iter() {
