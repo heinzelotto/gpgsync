@@ -4,7 +4,9 @@ use anyhow::bail;
 use crossbeam_channel::select;
 
 mod diff;
+mod fs_ops;
 mod fs_utils;
+mod gpg;
 mod merge;
 mod notifier;
 mod path_aggregator;
@@ -240,6 +242,12 @@ impl GpgSync {
 
         // TODO: perform fs ops
         // TODO: make 100% sure that file ops can only touch files beneath the two dirs. I don't want to accidentally rm -rf / just because an empty path snuck in there.
+        fs_ops::perform_file_ops(
+            &file_ops,
+            &self.plain_root,
+            &self.enc_root,
+            &self.passphrase,
+        );
 
         update::update_trees_with_changes(&mut self.enc_tree, &mut self.plain_tree, &file_ops);
         //}
@@ -351,8 +359,16 @@ mod test {
             make_file(&pr.join("notes.txt"), b"hello");
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init();
-            gpgs.try_process_events(std::time::Duration::from_secs(2))?;
-            assert!(gr.join("notes.txt.gpg").exists());
+
+            poll_predicate(
+                &mut || {
+                    gpgs.try_process_events(std::time::Duration::from_millis(10))
+                        .unwrap();
+
+                    gr.join("notes.txt.gpg").exists()
+                },
+                std::time::Duration::new(2, 0),
+            );
         }
 
         // GD/notes.txt.gpg -> PD/notes.txt
@@ -361,8 +377,15 @@ mod test {
             make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init();
-            gpgs.try_process_events(std::time::Duration::from_secs(2))?;
-            assert!(pr.join("notes.txt").exists());
+
+            poll_predicate(
+                &mut || {
+                    gpgs.try_process_events(std::time::Duration::from_millis(10))
+                        .unwrap();
+                    pr.join("notes.txt").exists()
+                },
+                std::time::Duration::from_secs(2),
+            );
         }
 
         Ok(())
@@ -405,8 +428,8 @@ mod test {
         init_dirs(&pr, &gr);
         make_file(&pr.join("notes.txt"), b"hello");
         let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
-        assert!(gr.join("notes.txt.gpg").exists());
-
+        gpgs.init();
+        assert!(!gr.join("notes.txt.gpg").exists());
         std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt"))?;
 
         poll_predicate(
@@ -418,6 +441,8 @@ mod test {
             },
             Duration::new(2, 0),
         );
+
+        assert!(gr.join("notes.txt.gpg").exists());
 
         Ok(())
     }

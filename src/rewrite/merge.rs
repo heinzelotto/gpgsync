@@ -13,9 +13,8 @@ fn handle_independently(
     tree_type: TreeType,
     other_side_deleted_root: Option<&PathBuf>,
 ) {
-    dbg!(&ne, &root, &ops, &tree_type, &other_side_deleted_root);
     ne.dfs_preorder_path(&mut |cur: &TreeNode, relpath: &Path| {
-        let mut curpath = dbg!(root.clone());
+        let mut curpath = root.clone();
         if relpath != PathBuf::new() {
             // Don't push the empty path. That would just add an unneeded directory delimiter and break it if curpath is a file.
             curpath.push(relpath); // relpath might be empty
@@ -23,12 +22,15 @@ fn handle_independently(
 
         // TODO first check if we are children and if we are enc. Then add
 
-        dbg!(&cur, &relpath, &curpath);
-        let curpath_enc = if cur.children.is_none() {
-            add_gpg_suffix(&curpath)
+        let (curpath_enc, curpath_plain) = if cur.children.is_none() {
+            match tree_type {
+                TreeType::Encrypted => (curpath.clone(), remove_gpg_suffix(&curpath)),
+                TreeType::Plain => (add_gpg_suffix(&curpath), curpath.clone()),
+            }
         } else {
-            curpath.clone()
+            (curpath.clone(), curpath.clone())
         };
+        let curpath_plain = curpath.clone();
 
         let mut curpath_conflictcopy = other_side_deleted_root.map(|p: &PathBuf| {
             let mut curcopy = p.clone();
@@ -55,13 +57,15 @@ fn handle_independently(
                 ops.push(match (other_side_deleted_root.is_some(), &tree_type) {
                     (true, TreeType::Encrypted) => {
                         // enc tree already contains .gpg endings and so does the curpath_conflictcopy
-                        FileOperation::ConflictCopyEnc(curpath, curpath_conflictcopy.unwrap())
+                        FileOperation::ConflictCopyEnc(curpath_enc, curpath_conflictcopy.unwrap())
                     }
-                    (true, TreeType::Plain) => {
-                        FileOperation::ConflictCopyPlain(curpath, curpath_conflictcopy.unwrap())
-                    }
-                    (false, TreeType::Encrypted) => FileOperation::Decryption(curpath_enc),
-                    (false, TreeType::Plain) => FileOperation::Encryption(curpath),
+                    (true, TreeType::Plain) => FileOperation::ConflictCopyPlain(
+                        curpath_plain,
+                        curpath_conflictcopy.unwrap(),
+                    ),
+                    // TODO: this passes the responsibility for possible recursive en-/decryption to the evaluation of the fileoperation. We could also recurse here and generate a list of fileops for each file and an EncryptFolderJustCopy for directories.
+                    (false, TreeType::Encrypted) => FileOperation::DecryptEnc(curpath_enc),
+                    (false, TreeType::Plain) => FileOperation::EncryptPlain(curpath_plain),
                 })
             }
             None => {}
@@ -136,14 +140,12 @@ fn calculate_merge_rec(
     for (ke_normalized, original_ke_enc) in subentries {
         println!("current ke: {}", &ke_normalized);
         // retrieve possibly ke with added
-        match (dbg!(
-            original_ke_enc.as_ref().and_then(|enc_entry| enc
-                .children
+        match (
+            original_ke_enc
                 .as_ref()
-                .unwrap()
-                .get(enc_entry)),
+                .and_then(|enc_entry| enc.children.as_ref().unwrap().get(enc_entry)),
             plain.children.as_ref().unwrap().get(&ke_normalized),
-        )) {
+        ) {
             (Some(ne), Some(np)) => {
                 let original_ke_enc = original_ke_enc.unwrap();
 
@@ -221,7 +223,7 @@ fn calculate_merge_rec(
                             TreeType::Plain,
                             Some(&newconflictcopypathp),
                         );
-                        ops.push(FileOperation::Decryption(newpathp));
+                        ops.push(FileOperation::DecryptEnc(newpathp));
                     }
                     (Some(Dirt::PathDirt), Some(Dirt::Modified)) => {
                         // handle the pathdirt with a conflictcopy and apply the modification
@@ -232,7 +234,7 @@ fn calculate_merge_rec(
                             TreeType::Encrypted,
                             Some(&newconflictcopypathe),
                         );
-                        ops.push(FileOperation::Encryption(newpathe));
+                        ops.push(FileOperation::EncryptPlain(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Modified)) => {
                         // conflictcopy plain, decrypt enc
@@ -240,7 +242,7 @@ fn calculate_merge_rec(
                             newpathp.clone(),
                             newconflictcopypathp,
                         ));
-                        ops.push(FileOperation::Decryption(newpathe));
+                        ops.push(FileOperation::DecryptEnc(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Deleted)) => {
                         // conflictcopy the modified one and delete the original
@@ -392,7 +394,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("f1.txt.gpg"))
+                FileOperation::DecryptEnc(PathBuf::from("f1.txt.gpg"))
             ]
         );
 
@@ -422,7 +424,7 @@ mod test {
     //                         t0.duration_since(t0)?.as_secs()
     //                     ))
     //                 ),
-    //                 FileOperation::Decryption(PathBuf::from("a/f1.txt"))
+    //                 FileOperation::DecryptEnc(PathBuf::from("a/f1.txt"))
     //             ]
     //         );
 
@@ -456,7 +458,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("a/f1.txt.gpg")),
+                FileOperation::DecryptEnc(PathBuf::from("a/f1.txt.gpg")),
                 FileOperation::ConflictCopyPlain(
                     PathBuf::from("a/f2.txt"),
                     PathBuf::from(format!(
@@ -464,7 +466,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("a/f2.txt.gpg")),
+                FileOperation::DecryptEnc(PathBuf::from("a/f2.txt.gpg")),
             ]
         );
 
@@ -630,7 +632,7 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Decryption(PathBuf::from("a")),
+                FileOperation::DecryptEnc(PathBuf::from("a")),
             ]
         );
 
@@ -662,7 +664,7 @@ mod test {
                         t0.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::Encryption(PathBuf::from("a")),
+                FileOperation::EncryptPlain(PathBuf::from("a")),
             ]
         );
 

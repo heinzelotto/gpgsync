@@ -7,6 +7,7 @@ pub fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<Fil
     for op in ops.iter() {
         match op {
             FileOperation::DeleteEnc(p) => {
+                dbg!(&enc.root);
                 enc.root
                     .get_parent_of(&p)
                     .unwrap()
@@ -25,7 +26,7 @@ pub fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<Fil
                     .unwrap()
                     .remove(&p.file_name().unwrap().to_string_lossy().to_string());
             }
-            FileOperation::Encryption(p_plain) => {
+            FileOperation::EncryptPlain(p_plain) => {
                 let target_node_clone = plain
                     .root
                     .get_parent_of(&p_plain)
@@ -54,7 +55,7 @@ pub fn update_trees_with_changes(enc: &mut Tree, plain: &mut Tree, ops: &Vec<Fil
                     target_node_clone,
                 );
             }
-            FileOperation::Decryption(p_enc) => {
+            FileOperation::DecryptEnc(p_enc) => {
                 let target_node_clone = enc
                     .root
                     .get_parent_of(&p_enc)
@@ -340,7 +341,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::Encryption(PathBuf::from("a/f1.txt"))],
+            &vec![FileOperation::EncryptPlain(PathBuf::from("a/f1.txt"))],
         );
 
         let tr = Tree {
@@ -362,7 +363,7 @@ mod test {
 
     #[test]
     fn test_update_tree_5() -> anyhow::Result<()> {
-        // Decryption (simple leaf in subdir)
+        // DecryptEnc (simple leaf in subdir)
 
         let t0 = std::time::SystemTime::UNIX_EPOCH;
         let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
@@ -377,7 +378,7 @@ mod test {
         update_trees_with_changes(
             &mut tree_e,
             &mut tree_p,
-            &vec![FileOperation::Decryption(PathBuf::from("a/f1.txt.gpg"))],
+            &vec![FileOperation::DecryptEnc(PathBuf::from("a/f1.txt.gpg"))],
         );
 
         let tr = Tree {

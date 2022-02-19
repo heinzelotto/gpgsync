@@ -9,13 +9,20 @@ use crate::rewrite::tree::{Dirt, Tree, TreeNode};
 /// "Deleted"
 pub struct TreeReconciler {}
 
+/// Denotes an operation on one or both file system trees. Paths must always be relative to make sure that nothing outside of plain_root and gpg_root is touched.
 #[derive(Debug, Eq, PartialEq)]
 pub enum FileOperation {
+    /// Delete the file or folder within the enc_root
     DeleteEnc(PathBuf),
+    /// Delete the file or folder within the plain_root
     DeletePlain(PathBuf),
-    Encryption(PathBuf),
-    Decryption(PathBuf),
+    /// Encrypt the file or folder in the plain_root and place the result in the enc_root.
+    EncryptPlain(PathBuf),
+    /// Decrypt the file or folder in the enc_root and place the result in the plain_root.
+    DecryptEnc(PathBuf),
+    /// Create a conflict copy from the file within enc_root to a renamed path within enc_root
     ConflictCopyEnc(PathBuf, PathBuf),
+    /// Create a conflict copy from the file within plain_root to a renamed path within plain_root
     ConflictCopyPlain(PathBuf, PathBuf), // TODO could be a move but ?how to handle the rename or delete/modify notification from the notifier then
 }
 
