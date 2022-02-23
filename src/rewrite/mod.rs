@@ -105,7 +105,7 @@ impl GpgSync {
     //pub fn init_from_savefile_or_fs() TODO e. g. currently it crashes when no
     // init is done, tree is empty, and a deleted path is notified which then
     // neither exists in the tree nor in the fs
-    pub fn init(&mut self) {
+    pub fn init(&mut self) -> anyhow::Result<()> {
         // as long as we don't support a persistent database, just compare the
         // initially empty tree with the directory every time
         diff::TreeReconciler::diff_from_filesystem(
@@ -121,6 +121,11 @@ impl GpgSync {
             std::path::Path::new(""),
             diff::TreeType::Encrypted,
         );
+
+        // perform initial sync
+        self.try_process_events(std::time::Duration::from_millis(10))?;
+
+        Ok(())
     }
 
     /// Drain all notified paths and feed them to the aggregators.
@@ -144,7 +149,7 @@ impl GpgSync {
                 dbg!(&msg);
                 if let Ok(ev) = msg {
                     for p in ev.paths {
-                        // TODO: ?filter directoryes or .gpg
+                        // TODO: ?filter directories or .gpg
                         enc_path_aggregator.mark_path(p.strip_prefix(&self.enc_root).unwrap());
                     }
                 }
@@ -173,8 +178,8 @@ impl GpgSync {
         for subpath_of_interest in enc_path_aggregator.iter() {
             println!("enc path touched: {:?}, diffing...", subpath_of_interest);
             diff::TreeReconciler::diff_from_filesystem(
-                &self.plain_root,
-                &mut self.plain_tree,
+                &self.enc_root,
+                &mut self.enc_tree,
                 subpath_of_interest,
                 diff::TreeType::Encrypted,
             );
@@ -218,6 +223,21 @@ impl GpgSync {
             &mut enc_path_aggregator,
             timeout,
         );
+        dbg!(&self.plain_tree);
+        {
+            let paths = std::fs::read_dir(&self.plain_root).unwrap();
+            for path in paths {
+                println!("Name: {}", path.unwrap().path().display())
+            }
+        }
+        dbg!(&self.enc_tree);
+        {
+            let paths = std::fs::read_dir(&self.enc_root).unwrap();
+            for path in paths {
+                println!("Name: {}", path.unwrap().path().display())
+            }
+        }
+
         self.diff_with_aggregator(&mut plain_path_aggregator, &mut enc_path_aggregator);
 
         if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
@@ -225,9 +245,6 @@ impl GpgSync {
             return Ok(());
             // continue;
         }
-
-        dbg!(&self.plain_tree);
-        dbg!(&self.enc_tree);
 
         let file_ops = merge::calculate_merge(&self.enc_tree, &self.plain_tree);
 
@@ -237,11 +254,13 @@ impl GpgSync {
             // continue;
         }
 
-        println!("From now on there must be no additional user caused filesystem accesses. Starting file system modifications");
+        println!("From now on there must be no additional user caused filesystem accesses! Filesystem notifications during this phase will be ignored. Starting file system modifications");
         dbg!(&file_ops);
 
+        let _plain_watcher_pause_guard = self.plain_watcher.pause_watch();
+        let _enc_watcher_pause_guard = self.enc_watcher.pause_watch();
+
         // TODO: perform fs ops
-        // TODO: make 100% sure that file ops can only touch files beneath the two dirs. I don't want to accidentally rm -rf / just because an empty path snuck in there.
         fs_ops::perform_file_ops(
             &file_ops,
             &self.plain_root,
@@ -249,18 +268,31 @@ impl GpgSync {
             &self.passphrase,
         );
 
+        // Reflect the filesystem changes caused by our filesystem operations in the trees.
         update::update_trees_with_changes(&mut self.enc_tree, &mut self.plain_tree, &file_ops);
+        // Reflect any deletions performed by the user (that triggered us in the first place) in the trees.
+        self.plain_tree.prune_deleted();
+        self.enc_tree.prune_deleted();
+
+        self.plain_tree.clean();
+        self.enc_tree.clean();
+
+        dbg!(&self.plain_tree);
+        {
+            let paths = std::fs::read_dir(&self.plain_root).unwrap();
+            for path in paths {
+                println!("Name: {}", path.unwrap().path().display())
+            }
+        }
+        dbg!(&self.enc_tree);
+        {
+            let paths = std::fs::read_dir(&self.enc_root).unwrap();
+            for path in paths {
+                println!("Name: {}", path.unwrap().path().display())
+            }
+        }
+
         //}
-
-        // for plain_event in self.plain_watcher.rx.try_iter() {
-        //     dbg!(plain_event);
-        //     // TODO add to plain path set
-        // }
-
-        // for gpg_event in self.gpg_watcher.rx.try_iter() {
-        //     dbg!(gpg_event);
-        //     // TODO add to enc path set
-        // }
 
         // loop {
         //     let received_result = gpgsync.plain_watcher.rx.try_recv();
@@ -288,15 +320,13 @@ mod test {
     use lazy_static::lazy_static;
     use std::io::Write;
     use std::path::{Path, PathBuf};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn poll_predicate(p: &mut dyn FnMut() -> bool, timeout: Duration) {
-        let mut remaining = Some(timeout);
-        let decrement = Duration::new(0, 3_000_000);
+        let start = Instant::now();
+        let decrement = Duration::from_millis(5);
         loop {
-            if let Some(rem) = remaining {
-                remaining = rem.checked_sub(decrement);
-            } else {
+            if Instant::now() >= start + timeout {
                 break;
             }
 
@@ -358,7 +388,7 @@ mod test {
             init_dirs(&pr, &gr);
             make_file(&pr.join("notes.txt"), b"hello");
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
-            gpgs.init();
+            gpgs.init()?;
 
             poll_predicate(
                 &mut || {
@@ -376,7 +406,7 @@ mod test {
             init_dirs(&pr, &gr);
             make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
-            gpgs.init();
+            gpgs.init()?;
 
             poll_predicate(
                 &mut || {
@@ -428,21 +458,25 @@ mod test {
         init_dirs(&pr, &gr);
         make_file(&pr.join("notes.txt"), b"hello");
         let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
-        gpgs.init();
         assert!(!gr.join("notes.txt.gpg").exists());
+        gpgs.init()?;
+        assert!(gr.join("notes.txt.gpg").exists());
+        gpgs.try_process_events(Duration::from_millis(10));
+
         std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt"))?;
+        assert!(!pr.join("notes.txt").exists() && pr.join("notes_renamed.txt").exists());
 
         poll_predicate(
             &mut || {
-                gpgs.try_process_events(Duration::new(0, 200_000_000))
-                    .unwrap();
+                gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
-                !gr.join("notes.txt.gpg").exists() && gr.join("notes_renamed.txt.gpg").exists()
+                !pr.join("notes.txt").exists()
+                    && pr.join("notes_renamed.txt").exists()
+                    && !gr.join("notes.txt.gpg").exists()
+                    && gr.join("notes_renamed.txt.gpg").exists()
             },
-            Duration::new(2, 0),
+            Duration::from_millis(500),
         );
-
-        assert!(gr.join("notes.txt.gpg").exists());
 
         Ok(())
     }

@@ -55,6 +55,14 @@ impl TreeNode {
         }
     }
 
+    pub fn is_dir(&self) -> bool {
+        self.children.is_some()
+    }
+
+    pub fn is_file(&self) -> bool {
+        self.children.is_none()
+    }
+
     pub fn clean(&mut self) {
         // match self {
         //     TreeNode::Directory(ref mut dirt, ref mut map) => {
@@ -81,17 +89,24 @@ impl TreeNode {
         // }
     }
 
+    // pub fn dfs_preorder<F>(&mut self, fun: &mut F)
+    // where
+    //     F: FnMut(&mut TreeNode) -> (),
+    // {
+    //     fun(self);
+
+    //     if let Some(children) = &mut self.children {
+    //         for nb in children.values_mut() {
+    //             nb.dfs_preorder(fun);
+    //         }
+    //     }
+    // }
+
     pub fn dfs_preorder<F>(&mut self, fun: &mut F)
     where
-        F: FnMut(&mut TreeNode) -> (),
+        F: FnMut(&mut TreeNode) -> bool,
     {
-        fun(self);
-
-        if let Some(children) = &mut self.children {
-            for nb in children.values_mut() {
-                nb.dfs_preorder(fun);
-            }
-        }
+        self.dfs_preorder_path_mut(&mut |tn, _| fun(tn));
     }
 
     pub fn dfs_preorder_path<F>(&self, fun: &mut F)
@@ -112,6 +127,31 @@ impl TreeNode {
                     relpath.push(nb_name);
 
                     nb_item.dfs_preorder_path_impl(fun, relpath);
+
+                    relpath.pop();
+                }
+            }
+        }
+    }
+
+    pub fn dfs_preorder_path_mut<F>(&mut self, fun: &mut F)
+    where
+        F: FnMut(&mut TreeNode, &Path) -> bool,
+    {
+        let mut relpath = PathBuf::new();
+        self.dfs_preorder_path_mut_impl(fun, &mut relpath);
+    }
+
+    pub fn dfs_preorder_path_mut_impl<F>(&mut self, fun: &mut F, relpath: &mut PathBuf)
+    where
+        F: FnMut(&mut TreeNode, &Path) -> bool,
+    {
+        if fun(self, &relpath) {
+            if let Some(children) = &mut self.children {
+                for (nb_name, nb_item) in children.iter_mut() {
+                    relpath.push(nb_name);
+
+                    nb_item.dfs_preorder_path_mut_impl(fun, relpath);
 
                     relpath.pop();
                 }
@@ -316,7 +356,37 @@ impl Tree {
         n.dfs_preorder(&mut |cur: &mut TreeNode| {
             cur.mtime = mtime;
             cur.dirt = Some(Dirt::Deleted);
+
+            true
         });
+    }
+
+    /// Go through all dirty paths, deleting whole subtrees that have Dirt::Deleted.
+    pub fn prune_deleted(&mut self) {
+        self.root.dfs_preorder(&mut |tn| {
+            // We can only modify children but that is ok since we start at the root node which is never deleted.
+            assert!(tn.dirt != Some(Dirt::Deleted));
+
+            if let Some(ref mut hm) = &mut tn.children {
+                hm.retain(|_, v| {
+                    v.dirt != Some(Dirt::Deleted)});
+            }
+
+            match tn.dirt {
+                Some(Dirt::Deleted) => {
+                    panic!("Dirt::Deleted nodes must never be reached since they should have been deleted while traversing their parent step.");
+                },
+                Some(Dirt::Modified) => {
+                    // TODO: confirm that if a directory contains modified + deleted, it will become pathdirt, thus we can skip this case
+                   false
+                },
+                Some(Dirt::PathDirt) => {
+                    // traverse
+                    true
+                },
+                None => false,
+            }
+        })
     }
 
     fn rename(&mut self, path: &Path) {}

@@ -11,18 +11,35 @@ pub fn perform_file_ops(
     passphrase: &str,
 ) -> anyhow::Result<()> {
     for fop in file_ops {
+        // Make 100% sure that file ops can only touch files beneath the two dirs. I don't want to accidentally rm -rf / just because an empty absolute path snuck in there.
         match fop {
             FileOperation::DeleteEnc(pe) => {
                 assert!(pe.is_relative());
                 let target = enc_root.join(&pe);
                 println!("deleting enc {:?}", &target);
-                std::fs::remove_dir_all(&target);
+                assert!(target.exists());
+                if target.is_dir() {
+                    std::fs::remove_dir_all(&target);
+                } else if target.is_file() {
+                    std::fs::remove_file(&target);
+                } else {
+                    panic!("neither dir nor file");
+                }
+                assert!(!target.exists());
             }
             FileOperation::DeletePlain(pp) => {
                 assert!(pp.is_relative());
                 let target = plain_root.join(&pp);
                 println!("deleting plain {:?}", &target);
-                //std::fs::remove_dir_all(&target);
+                assert!(target.exists());
+                if target.is_dir() {
+                    std::fs::remove_dir_all(&target);
+                } else if target.is_file() {
+                    std::fs::remove_file(&target);
+                } else {
+                    panic!("neither dir nor file");
+                }
+                assert!(!target.exists());
             }
             FileOperation::EncryptPlain(pp) => {
                 assert!(pp.is_relative());
