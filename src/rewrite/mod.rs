@@ -428,6 +428,41 @@ mod test {
     #[test]
     fn test_directories() -> anyhow::Result<()> {
         let (pr, gr) = test_roots("test_directories");
+        // PD/dir/ -> GD/dir/
+        {
+            init_dirs(&pr, &gr);
+            std::fs::create_dir_all(&pr.join("dir"));
+            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            gpgs.init()?;
+
+            poll_predicate(
+                &mut || {
+                    gpgs.try_process_events(std::time::Duration::from_millis(10))
+                        .unwrap();
+
+                    gr.join("dir").exists()
+                },
+                std::time::Duration::from_millis(100),
+            );
+        }
+
+        // GD/dir/ -> PD/dir/
+        {
+            init_dirs(&pr, &gr);
+            std::fs::create_dir_all(&gr.join("dir"));
+            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            gpgs.init()?;
+
+            poll_predicate(
+                &mut || {
+                    gpgs.try_process_events(std::time::Duration::from_millis(10))
+                        .unwrap();
+
+                    pr.join("dir").exists()
+                },
+                std::time::Duration::from_millis(100),
+            );
+        }
 
         // PD/dir/... -> GD/dir/...
         {
