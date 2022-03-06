@@ -51,6 +51,8 @@ pub fn perform_file_ops(
                 } else {
                     let target = enc_root.join(fs_utils::add_gpg_suffix(&pp));
                     assert!(!target.exists());
+                    let prefix = target.parent().unwrap();
+                    std::fs::create_dir_all(prefix).unwrap();
                     println!(
                         "encrypting {:?} and placing the result in {:?}",
                         &source, &target
@@ -70,6 +72,8 @@ pub fn perform_file_ops(
                 } else {
                     let target = plain_root.join(fs_utils::remove_gpg_suffix(&pe));
                     assert!(!target.exists());
+                    let prefix = target.parent().unwrap();
+                    std::fs::create_dir_all(prefix).unwrap();
                     println!(
                         "derypting {:?} and placing the result in {:?}",
                         &source, &target
@@ -101,3 +105,5 @@ pub fn perform_file_ops(
     }
     Ok(())
 }
+
+// TODO write tests

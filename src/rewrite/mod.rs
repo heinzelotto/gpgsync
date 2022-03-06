@@ -266,7 +266,7 @@ impl GpgSync {
             &self.plain_root,
             &self.enc_root,
             &self.passphrase,
-        );
+        )?;
 
         // Reflect the filesystem changes caused by our filesystem operations in the trees.
         update::update_trees_with_changes(&mut self.enc_tree, &mut self.plain_tree, &file_ops);
@@ -316,6 +316,8 @@ impl GpgSync {
 mod test {
 
     use super::GpgSync;
+    use crate::rewrite::fs_utils;
+    use crate::rewrite::gpg;
 
     use lazy_static::lazy_static;
     use std::io::Write;
@@ -369,6 +371,8 @@ mod test {
             .open(p)?;
         f.write_all(s)?;
 
+        assert!(p.exists());
+
         Ok(())
     }
 
@@ -386,7 +390,7 @@ mod test {
         // PD/notes.txt -> GD/notes.txt.gpg
         {
             init_dirs(&pr, &gr);
-            make_file(&pr.join("notes.txt"), b"hello");
+            make_file(&pr.join("notes.txt"), b"hello")?;
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init()?;
 
@@ -404,7 +408,7 @@ mod test {
         // GD/notes.txt.gpg -> PD/notes.txt
         {
             init_dirs(&pr, &gr);
-            make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+            make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"))?;
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init()?;
 
@@ -422,12 +426,45 @@ mod test {
     }
 
     #[test]
+    fn test_directories() -> anyhow::Result<()> {
+        let (pr, gr) = test_roots("test_directories");
+
+        // PD/dir/... -> GD/dir/...
+        {
+            init_dirs(&pr, &gr);
+            std::fs::create_dir_all(&pr.join("dir"));
+            make_file(&pr.join("dir").join("notes.txt"), b"hello")?;
+            std::fs::create_dir_all(&pr.join("dir").join("dir2"));
+            make_file(&pr.join("dir").join("dir2").join("notes2.txt"), b"hello2")?;
+            make_file(&pr.join("dir").join("dir2").join("notes3.txt"), b"hello3")?;
+            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            gpgs.init()?;
+
+            poll_predicate(
+                &mut || {
+                    gpgs.try_process_events(std::time::Duration::from_millis(10))
+                        .unwrap();
+
+                    gr.join("dir").join("notes.txt.gpg").exists()
+                        && gr.join("dir").join("dir2").join("notes2.txt.gpg").exists()
+                        && gr.join("dir").join("dir2").join("notes3.txt.gpg").exists()
+                },
+                std::time::Duration::from_millis(100),
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
     #[should_panic]
     fn test_wrong_passphrase() {
         let (pr, gr) = test_roots("test_wrong_passphrase");
         init_dirs(&pr, &gr);
+
         make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
-        let _gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
+        let mut gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
+        gpgs.init().unwrap();
     }
 
     #[test]
