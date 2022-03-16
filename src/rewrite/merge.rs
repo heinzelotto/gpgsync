@@ -23,6 +23,7 @@ fn handle_independently(
         // TODO first check if we are children and if we are enc. Then add
 
         let (curpath_enc, curpath_plain) = if cur.children.is_none() {
+            // This is a file, set correct .gpg suffixes
             match tree_type {
                 TreeType::Encrypted => (curpath.clone(), remove_gpg_suffix(&curpath)),
                 TreeType::Plain => (add_gpg_suffix(&curpath), curpath.clone()),
@@ -30,7 +31,6 @@ fn handle_independently(
         } else {
             (curpath.clone(), curpath.clone())
         };
-        let curpath_plain = curpath.clone();
 
         let mut curpath_conflictcopy = other_side_deleted_root.map(|p: &PathBuf| {
             let mut curcopy = p.clone();
@@ -42,7 +42,7 @@ fn handle_independently(
             Some(Dirt::Deleted) => {
                 if other_side_deleted_root.is_none() {
                     ops.push(match tree_type {
-                        TreeType::Encrypted => FileOperation::DeletePlain(curpath),
+                        TreeType::Encrypted => FileOperation::DeletePlain(curpath_plain),
                         TreeType::Plain => FileOperation::DeleteEnc(curpath_enc),
                     });
                 }
@@ -364,6 +364,31 @@ mod test {
         assert_eq!(
             calculate_merge(&tree_e, &tree_p),
             vec![FileOperation::DeleteEnc(PathBuf::from("f1.txt.gpg"))]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_del_clean() -> anyhow::Result<()> {
+        // del <-> clean (top-level)
+
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 1);
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("f1.txt.gpg"), false, t1);
+        tree_e.mark_deleted(&Path::new("f1.txt.gpg"), t1);
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("f1.txt"), false, t0);
+        tree_p.clean();
+        dbg!(&tree_p);
+
+        assert_eq!(
+            calculate_merge(&tree_e, &tree_p),
+            vec![FileOperation::DeletePlain(PathBuf::from("f1.txt"))]
         );
 
         Ok(())

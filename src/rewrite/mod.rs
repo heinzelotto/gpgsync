@@ -376,6 +376,14 @@ mod test {
         Ok(())
     }
 
+    fn make_encrypted_file(p: &Path, s: &[u8], passphrase: &str) -> anyhow::Result<()> {
+        let mut tmpfile = tempfile::NamedTempFile::new()?;
+        tmpfile.as_file().write_all(s)?;
+        crate::rewrite::fs_ops::encrypt_file(tmpfile.path(), p, passphrase)?;
+
+        Ok(())
+    }
+
     #[test]
     fn test_creation_failure() {
         // TODO one dir is inside the other
@@ -391,7 +399,7 @@ mod test {
         {
             init_dirs(&pr, &gr);
             make_file(&pr.join("notes.txt"), b"hello")?;
-            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
             gpgs.init()?;
 
             poll_predicate(
@@ -408,8 +416,8 @@ mod test {
         // GD/notes.txt.gpg -> PD/notes.txt
         {
             init_dirs(&pr, &gr);
-            make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"))?;
-            let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
+            make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase")?;
+            let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
             gpgs.init()?;
 
             poll_predicate(
@@ -497,7 +505,7 @@ mod test {
         let (pr, gr) = test_roots("test_wrong_passphrase");
         init_dirs(&pr, &gr);
 
-        make_file(&gr.join("notes.txt.gpg"), include_bytes!("notes.txt.gpg"));
+        make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase");
         let mut gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
         gpgs.init().unwrap();
     }
@@ -533,7 +541,7 @@ mod test {
         assert!(!gr.join("notes.txt.gpg").exists());
         gpgs.init()?;
         assert!(gr.join("notes.txt.gpg").exists());
-        gpgs.try_process_events(Duration::from_millis(10));
+        gpgs.try_process_events(Duration::from_millis(10))?;
 
         std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt"))?;
         assert!(!pr.join("notes.txt").exists() && pr.join("notes_renamed.txt").exists());
@@ -595,5 +603,35 @@ mod test {
         init_dir(&gr2);
         // pr is already initialized to dir `pr`, trying to connect it to enc dir `gr2` shall fail
         let _gpgs = GpgSync::new(&pr, &gr2, "test").unwrap();
+    }
+
+    #[test]
+    fn test_conflictcopy() -> anyhow::Result<()> {
+        // Test that a conflict copy is also synced back to the other side. ?This is what we want, right.
+
+        // also even if their contents are the same, they are conflictcopied. At
+        // least for the first run sha1 hashes of the contents should be
+        // compared to not create conflicts.
+        let (pr, gr) = test_roots("test_conflictcopy");
+
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+        make_encrypted_file(&gr.join("notes.txt.gpg"), b"hello", "passphrase")?;
+
+        let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
+        gpgs.init()?;
+        gpgs.try_process_events(Duration::from_millis(10))?;
+
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::from_millis(200)).unwrap();
+
+                std::fs::read_dir(&pr).unwrap().count() == 2
+                    && std::fs::read_dir(&gr).unwrap().count() == 2
+            },
+            Duration::from_millis(500),
+        );
+
+        Ok(())
     }
 }

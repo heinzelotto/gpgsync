@@ -11,7 +11,10 @@ pub fn file_status(fp: &PathBuf) -> std::io::Result<FileStatus> {
     Ok(FileStatus::Existent(mtime))
 }
 
-pub fn visit_dir(dir: &Path, cb: &mut dyn FnMut(&DirEntry)) -> std::io::Result<()> {
+pub fn visit_dir<F>(dir: &Path, cb: &mut F) -> anyhow::Result<()>
+where
+    F: FnMut(&DirEntry) -> anyhow::Result<()>,
+{
     if dir.is_dir() {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -19,7 +22,7 @@ pub fn visit_dir(dir: &Path, cb: &mut dyn FnMut(&DirEntry)) -> std::io::Result<(
             if path.is_dir() {
                 visit_dir(&path, cb)?;
             } else {
-                cb(&entry);
+                cb(&entry)?;
             }
         }
     }

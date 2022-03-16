@@ -68,12 +68,8 @@ impl TreeNode {
         //     TreeNode::Directory(ref mut dirt, ref mut map) => {
         if self.dirt.is_some() {
             self.dirt = None;
-            println!("cleaning"); // TODO remove
 
             if let Some(children) = &mut self.children {
-                for k in children.keys() {
-                    println!("cleaning node {}", k); // TODO remove
-                }
                 for child in children.values_mut() {
                     child.clean();
                 }
