@@ -51,6 +51,7 @@ pub fn perform_file_ops(
         match fop {
             FileOperation::DeleteEnc(pe) => {
                 assert!(pe.is_relative());
+
                 let target = enc_root.join(&pe);
                 println!("deleting enc {:?}", &target);
                 assert!(target.exists());
@@ -65,6 +66,7 @@ pub fn perform_file_ops(
             }
             FileOperation::DeletePlain(pp) => {
                 assert!(pp.is_relative());
+
                 let target = plain_root.join(&pp);
                 println!("deleting plain {:?}", &target);
                 assert!(target.exists());
@@ -79,6 +81,7 @@ pub fn perform_file_ops(
             }
             FileOperation::EncryptPlain(pp) => {
                 assert!(pp.is_relative());
+
                 let source = plain_root.join(&pp);
                 assert!(source.exists());
                 if source.is_dir() {
@@ -120,6 +123,7 @@ pub fn perform_file_ops(
             }
             FileOperation::DecryptEnc(pe) => {
                 assert!(pe.is_relative());
+
                 let source = enc_root.join(&pe);
                 assert!(source.exists());
                 if source.is_dir() {

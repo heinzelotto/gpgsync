@@ -20,9 +20,9 @@ pub enum FileOperation {
     EncryptPlain(PathBuf),
     /// Decrypt the file or folder in the enc_root and place the result in the plain_root.
     DecryptEnc(PathBuf),
-    /// Create a conflict copy from the file within enc_root to a renamed path within enc_root
+    /// Create a conflict copy from the file within enc_root to a renamed path within enc_root. (Must be combined with a DecryptEnc on the newly generated conflict copy.)
     ConflictCopyEnc(PathBuf, PathBuf),
-    /// Create a conflict copy from the file within plain_root to a renamed path within plain_root
+    /// Create a conflict copy from the file within plain_root to a renamed path within plain_root. (Must be combined with an EncryptPlain on the newly generated conflict copy.)
     ConflictCopyPlain(PathBuf, PathBuf), // TODO could be a move but ?how to handle the rename or delete/modify notification from the notifier then
 }
 

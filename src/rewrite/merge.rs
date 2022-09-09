@@ -63,7 +63,7 @@ fn handle_independently(
                         curpath_plain,
                         curpath_conflictcopy.unwrap(),
                     ),
-                    // TODO: this passes the responsibility for possible recursive en-/decryption to the evaluation of the fileoperation. We could also recurse here and generate a list of fileops for each file and an EncryptFolderJustCopy for directories.
+                    // TODO: this passes the responsibility for recursive en-/decryption in case of directories to the evaluation of the fileoperation. We could also recurse here and generate a list of fileops for each file and an EncryptFolderJustCopy for directories.
                     (false, TreeType::Encrypted) => FileOperation::DecryptEnc(curpath_enc),
                     (false, TreeType::Plain) => FileOperation::EncryptPlain(curpath_plain),
                 })
@@ -81,6 +81,21 @@ pub fn calculate_merge(enc: &Tree, plain: &Tree) -> Vec<FileOperation> {
 
     let mut path = PathBuf::new();
     calculate_merge_rec(&enc.root, &plain.root, &mut ops, &mut path);
+
+    // for every conflict copy, add a corresponding encrypt/decrypt operation
+    let mut additional_conflict_ops = ops
+        .iter()
+        .filter_map(|op| match op {
+            FileOperation::ConflictCopyEnc(_, pec) => {
+                Some(FileOperation::DecryptEnc(pec.to_owned()))
+            }
+            FileOperation::ConflictCopyPlain(_, ppc) => {
+                Some(FileOperation::EncryptPlain(ppc.to_owned()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<FileOperation>>();
+    ops.append(&mut additional_conflict_ops);
 
     // TODO sort conflictcopy operations at front
     ops

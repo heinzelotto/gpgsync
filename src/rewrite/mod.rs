@@ -260,7 +260,6 @@ impl GpgSync {
         let _plain_watcher_pause_guard = self.plain_watcher.pause_watch();
         let _enc_watcher_pause_guard = self.enc_watcher.pause_watch();
 
-        // TODO: perform fs ops
         fs_ops::perform_file_ops(
             &file_ops,
             &self.plain_root,
@@ -606,17 +605,17 @@ mod test {
     }
 
     #[test]
-    fn test_conflictcopy() -> anyhow::Result<()> {
-        // Test that a conflict copy is also synced back to the other side. ?This is what we want, right.
+    fn test_conflictcopy_plain() -> anyhow::Result<()> {
+        // Test that a conflict copy is also synced back to the other side.
 
         // also even if their contents are the same, they are conflictcopied. At
         // least for the first run sha1 hashes of the contents should be
         // compared to not create conflicts.
-        let (pr, gr) = test_roots("test_conflictcopy");
+        let (pr, gr) = test_roots("test_conflictcopy_plain");
 
         init_dirs(&pr, &gr);
         make_file(&pr.join("notes.txt"), b"hello");
-        make_encrypted_file(&gr.join("notes.txt.gpg"), b"hello", "passphrase")?;
+        make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
 
         let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
         gpgs.init()?;
@@ -626,12 +625,112 @@ mod test {
             &mut || {
                 gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
-                std::fs::read_dir(&pr).unwrap().count() == 2
-                    && std::fs::read_dir(&gr).unwrap().count() == 2
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 2
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 2
             },
             Duration::from_millis(500),
         );
 
         Ok(())
     }
+
+    #[test]
+    fn test_conflictcopy_enc() -> anyhow::Result<()> {
+        // Test that a conflict copy is also synced back to the other side.
+
+        // In the case plain-delete and enc-modified a ConflictCopyEnc is performed, so lets do that.
+        let (pr, gr) = test_roots("test_conflictcopy_enc");
+
+        init_dirs(&pr, &gr);
+        make_file(&pr.join("notes.txt"), b"hello");
+
+        let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
+        gpgs.init()?;
+        gpgs.try_process_events(Duration::from_millis(10))?;
+
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::from_millis(200)).unwrap();
+
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 1
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 1
+            },
+            Duration::from_millis(500),
+        );
+
+        std::fs::remove_file(&pr.join("notes.txt"))?;
+        make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
+
+        poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::from_millis(200)).unwrap();
+
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 1
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 1
+            },
+            Duration::from_millis(500),
+        );
+
+        Ok(())
+    }
+
+    // #[test]
+    // fn test_conflictcopy_samecontent_plain() -> anyhow::Result<()> {
+    //     // Test that a conflict copy is also synced back to the other side.
+
+    //     // Since their contents are the same, they shall not be conflictcopied. At
+    //     // least for the first run sha1 hashes of the contents should be
+    //     // compared to not create conflicts.
+    //     let (pr, gr) = test_roots("test_conflictcopy_samecontent_plain");
+
+    //     init_dirs(&pr, &gr);
+    //     make_file(&pr.join("notes.txt"), b"both_hello");
+    //     make_encrypted_file(&gr.join("notes.txt.gpg"), b"both_hello", "passphrase")?;
+
+    //     let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
+    //     gpgs.init()?;
+    //     gpgs.try_process_events(Duration::from_millis(10))?;
+
+    //     poll_predicate(
+    //         &mut || {
+    //             gpgs.try_process_events(Duration::from_millis(200)).unwrap();
+
+    //             dbg!(std::fs::read_dir(&pr).unwrap().count()) == 2
+    //                 && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 2
+    //         },
+    //         Duration::from_millis(500),
+    //     );
+
+    //     Ok(())
+    // }
+
+    // #[test]
+    // fn test_conflictcopy_samecontent_enc() -> anyhow::Result<()> {
+    //     // Test that a conflict copy is also synced back to the other side.
+
+    //     // Since their contents are the same, they shall not be conflictcopied. At
+    //     // least for the first run sha1 hashes of the contents should be
+    //     // compared to not create conflicts.
+    //     let (pr, gr) = test_roots("test_conflictcopy_samecontent_enc");
+
+    //     init_dirs(&pr, &gr);
+    //     make_file(&pr.join("notes.txt"), b"both_hello");
+    //     make_encrypted_file(&gr.join("notes.txt.gpg"), b"both_hello", "passphrase")?;
+
+    //     let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
+    //     gpgs.init()?;
+    //     gpgs.try_process_events(Duration::from_millis(10))?;
+
+    //     poll_predicate(
+    //         &mut || {
+    //             gpgs.try_process_events(Duration::from_millis(200)).unwrap();
+
+    //             dbg!(std::fs::read_dir(&pr).unwrap().count()) == 2
+    //                 && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 2
+    //         },
+    //         Duration::from_millis(500),
+    //     );
+
+    //     Ok(())
+    // }
 }
