@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct PathAggregator(Vec<std::path::PathBuf>);
 
 impl PathAggregator {

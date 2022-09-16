@@ -47,6 +47,7 @@ impl TreeReconciler {
         subtree_of_interest: &Path,
         tree_type: TreeType,
     ) -> std::io::Result<()> {
+        dbg!(&subtree_of_interest);
         let filesystem_corresponding_to_subtree = if fs_root.join(subtree_of_interest).exists() {
             Some(fs_root.join(&subtree_of_interest))
         } else {
@@ -63,30 +64,37 @@ impl TreeReconciler {
                 // TODO ?what if fs contains a file and tree a dir. check all the cases, write tests.
 
                 // TODO filter .gpg (??and ignore upper_lowercase)
-                // TODO currently seems like there subtree_of_interest should be a dir
-                let set_fs: std::collections::BTreeSet<String> =
-                    std::fs::read_dir(fs_root.join(&fp))?
-                        // .filter(|entry| {
-                        //     entry.as_ref().map(
-                        //         |ok_entry| ok_entry.metadata().map(|md| !md.is_dir())
-                        //     ).unwrap_or(Ok(true)).unwrap_or(true) && ok_entry.map(file)
-                        // })
-                        .filter(|entry| {
-                            tree_type == TreeType::Plain
-                                || entry.as_ref().map_or(true, |ok_entry| {
-                                    !(ok_entry.metadata().map_or(true, |md| !md.is_dir())
-                                        && ok_entry
-                                            .path()
-                                            .extension()
-                                            .map_or(true, |ext| !ext.eq("gpg")))
-                                })
-                        })
-                        .map(|entry| {
-                            entry.map(|ok_entry| ok_entry.file_name().to_string_lossy().to_string())
-                        })
-                        .collect::<Result<std::collections::BTreeSet<String>, std::io::Error>>()?;
+                let subtree_on_fs_is_dir = fs_root.join(&fp).metadata()?.is_dir();
+                let subtree_on_tr_is_dir = tr.get(&subtree_of_interest).unwrap().children.is_some();
 
-                let set_tr: std::collections::BTreeSet<String> = tr
+                assert!(subtree_on_fs_is_dir == subtree_on_tr_is_dir);
+                if (subtree_on_fs_is_dir && subtree_on_tr_is_dir) {
+                    let set_fs: std::collections::BTreeSet<String> =
+                        std::fs::read_dir(fs_root.join(&fp))?
+                            // .filter(|entry| {
+                            //     entry.as_ref().map(
+                            //         |ok_entry| ok_entry.metadata().map(|md| !md.is_dir())
+                            //     ).unwrap_or(Ok(true)).unwrap_or(true) && ok_entry.map(file)
+                            // })
+                            .filter(|entry| {
+                                tree_type == TreeType::Plain
+                                    || entry.as_ref().map_or(true, |ok_entry| {
+                                        !(ok_entry.metadata().map_or(true, |md| !md.is_dir())
+                                            && ok_entry
+                                                .path()
+                                                .extension()
+                                                .map_or(true, |ext| !ext.eq("gpg")))
+                                    })
+                            })
+                            .map(|entry| {
+                                entry.map(|ok_entry| {
+                                    ok_entry.file_name().to_string_lossy().to_string()
+                                })
+                            })
+                            .collect::<Result<std::collections::BTreeSet<String>, std::io::Error>>(
+                            )?;
+
+                    let set_tr: std::collections::BTreeSet<String> = tr
                     .get(&subtree_of_interest)
                     .unwrap()
                     .children
@@ -98,50 +106,61 @@ impl TreeReconciler {
                     .cloned()
                     .collect();
 
-                for existing_child_name in set_fs.union(&set_tr) {
-                    let child_on_fs = if fs_root.join(&existing_child_name).exists() {
-                        Some(fs_root.join(&existing_child_name))
-                    } else {
-                        None
-                    };
+                    for existing_child_name in set_fs.union(&set_tr) {
+                        let child_on_fs = if fs_root.join(&existing_child_name).exists() {
+                            Some(fs_root.join(&existing_child_name))
+                        } else {
+                            None
+                        };
 
-                    let mut recurse_necessary = true;
+                        let mut recurse_necessary = true;
 
-                    {
-                        let tp = tr.get(&subtree_of_interest).unwrap();
+                        {
+                            let tp = tr.get(&subtree_of_interest).unwrap();
 
-                        let child_in_tr = tp
-                            .children
-                            .as_mut()
-                            .expect("TODO currently must be dir")
-                            .get(existing_child_name)
-                            .map(|child| child.mtime);
-                        if child_on_fs.is_some() && child_in_tr.is_some() {
-                            let md = std::fs::metadata(fs_root.join(&fp))?;
-                            let mtime_fs = md.modified()?;
-                            if mtime_fs == child_in_tr.unwrap() {
-                                recurse_necessary = false;
-                            } else {
-                                // TODO this depends on write() not overwriting existing dirt
-                                tr.write(
-                                    &subtree_of_interest.join(&existing_child_name),
-                                    md.is_dir(),
-                                    mtime_fs,
-                                );
+                            let child_in_tr = tp
+                                .children
+                                .as_mut()
+                                .expect("TODO currently must be dir")
+                                .get(existing_child_name)
+                                .map(|child| child.mtime);
+                            if child_on_fs.is_some() && child_in_tr.is_some() {
+                                let md = std::fs::metadata(fs_root.join(&fp))?;
+                                let mtime_fs = md.modified()?;
+                                if dbg!(mtime_fs) == child_in_tr.unwrap() {
+                                    recurse_necessary = false;
+                                } else {
+                                    // TODO this depends on write() not overwriting existing dirt
+                                    tr.write(
+                                        &subtree_of_interest.join(&existing_child_name),
+                                        md.is_dir(),
+                                        mtime_fs,
+                                    );
+                                }
                             }
                         }
+
+                        if recurse_necessary {
+                            let child_dir = subtree_of_interest.join(existing_child_name);
+
+                            println!(
+                                "diff_from_filesystem_rec({:?}, {:?}, {:?}, {:?})",
+                                fs_root, tr, &child_dir, tree_type,
+                            );
+                            TreeReconciler::diff_from_filesystem_rec(
+                                fs_root, tr, &child_dir, tree_type,
+                            )?;
+                        }
                     }
-
-                    if recurse_necessary {
-                        let child_dir = subtree_of_interest.join(existing_child_name);
-
-                        TreeReconciler::diff_from_filesystem_rec(
-                            fs_root, tr, &child_dir, tree_type,
-                        )?;
+                } else {
+                    // !subtree_on_fs_is_dir && !subtree_on_tr_is_dir
+                    let mtime_fs = std::fs::metadata(fs_root.join(&fp))?.modified()?;
+                    let treenode = tr.get(&subtree_of_interest).unwrap();
+                    if dbg!(mtime_fs) != dbg!(treenode.mtime) {
+                        // TODO this depends on write() not overwriting existing dirt
+                        tr.write(&subtree_of_interest, false, mtime_fs);
                     }
                 }
-
-                // TODO implement
             }
             (Some(fp), false) => {
                 let md = std::fs::metadata(&fp)?;
@@ -277,7 +296,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Plain,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -317,7 +336,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Plain,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -361,7 +380,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Plain,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -405,7 +424,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Plain,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -448,7 +467,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Encrypted,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -488,7 +507,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Encrypted,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -532,7 +551,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Encrypted,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -576,7 +595,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Encrypted,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 
@@ -618,7 +637,7 @@ mod test {
             &mut tr,
             &subtree_of_interest,
             super::TreeType::Encrypted,
-        );
+        )?;
 
         std::fs::remove_dir_all(&fs_root);
 

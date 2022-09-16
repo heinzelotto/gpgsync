@@ -164,7 +164,7 @@ impl GpgSync {
         &mut self,
         plain_path_aggregator: &mut path_aggregator::PathAggregator,
         enc_path_aggregator: &mut path_aggregator::PathAggregator,
-    ) {
+    ) -> std::io::Result<()> {
         for subpath_of_interest in plain_path_aggregator.iter() {
             println!("plain path touched: {:?}, diffing...", subpath_of_interest);
             diff::TreeReconciler::diff_from_filesystem(
@@ -172,7 +172,7 @@ impl GpgSync {
                 &mut self.plain_tree,
                 subpath_of_interest,
                 diff::TreeType::Plain,
-            );
+            )?;
         }
 
         for subpath_of_interest in enc_path_aggregator.iter() {
@@ -182,8 +182,10 @@ impl GpgSync {
                 &mut self.enc_tree,
                 subpath_of_interest,
                 diff::TreeType::Encrypted,
-            );
+            )?;
         }
+
+        Ok(())
     }
 
     // we create a new gpgsync and then, in a loop (this function is this loop):
@@ -230,6 +232,7 @@ impl GpgSync {
                 println!("Name: {}", path.unwrap().path().display())
             }
         }
+        dbg!(&plain_path_aggregator);
         dbg!(&self.enc_tree);
         {
             let paths = std::fs::read_dir(&self.enc_root).unwrap();
@@ -237,8 +240,9 @@ impl GpgSync {
                 println!("Name: {}", path.unwrap().path().display())
             }
         }
+        dbg!(&enc_path_aggregator);
 
-        self.diff_with_aggregator(&mut plain_path_aggregator, &mut enc_path_aggregator);
+        self.diff_with_aggregator(&mut plain_path_aggregator, &mut enc_path_aggregator)?;
 
         if self.plain_watcher.rx.len() > 0 || self.enc_watcher.rx.len() > 0 {
             println!("new notify events arrived while preparing filesystem diff, discarding and reprocessing...");
