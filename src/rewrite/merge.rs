@@ -434,7 +434,11 @@ mod test {
                         t1.duration_since(t0)?.as_secs()
                     ))
                 ),
-                FileOperation::DecryptEnc(PathBuf::from("f1.txt.gpg"))
+                FileOperation::DecryptEnc(PathBuf::from("f1.txt.gpg")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "conflict_{}_f1.txt",
+                    t1.duration_since(t0)?.as_secs()
+                )))
             ]
         );
 
@@ -507,6 +511,14 @@ mod test {
                     ))
                 ),
                 FileOperation::DecryptEnc(PathBuf::from("a/f2.txt.gpg")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "a/conflict_{}_f1.txt",
+                    t1.duration_since(t0)?.as_secs()
+                ))),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "a/conflict_{}_f2.txt",
+                    t1.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -541,6 +553,10 @@ mod test {
                     ))
                 ),
                 FileOperation::DeleteEnc(PathBuf::from("a")),
+                FileOperation::DecryptEnc(PathBuf::from(format!(
+                    "conflict_{}_a/f1.txt.gpg",
+                    t0.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -575,6 +591,10 @@ mod test {
                     ))
                 ),
                 FileOperation::DeletePlain(PathBuf::from("a")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "conflict_{}_a/f1.txt",
+                    t1.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -608,6 +628,10 @@ mod test {
                     ))
                 ),
                 FileOperation::DeletePlain(PathBuf::from("a/f1.txt")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "a/conflict_{}_f1.txt",
+                    t1.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -641,6 +665,10 @@ mod test {
                     ))
                 ),
                 FileOperation::DeleteEnc(PathBuf::from("a/f1.txt.gpg")),
+                FileOperation::DecryptEnc(PathBuf::from(format!(
+                    "a/conflict_{}_f1.txt.gpg",
+                    t0.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -673,6 +701,10 @@ mod test {
                     ))
                 ),
                 FileOperation::DecryptEnc(PathBuf::from("a")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "conflict_{}_a/f1.txt",
+                    t1.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
@@ -705,6 +737,10 @@ mod test {
                     ))
                 ),
                 FileOperation::EncryptPlain(PathBuf::from("a")),
+                FileOperation::DecryptEnc(PathBuf::from(format!(
+                    "conflict_{}_a/f1.txt.gpg",
+                    t0.duration_since(t0)?.as_secs()
+                ))),
             ]
         );
 
