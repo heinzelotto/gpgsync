@@ -10,6 +10,7 @@ mod gpg;
 mod merge;
 mod notifier;
 mod path_aggregator;
+mod test_utils;
 mod tree;
 mod update;
 
@@ -321,74 +322,15 @@ mod test {
     use super::GpgSync;
     use crate::rewrite::fs_utils;
     use crate::rewrite::gpg;
+    use crate::rewrite::test_utils;
 
     use lazy_static::lazy_static;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
+
     use std::time::{Duration, Instant};
-
-    fn poll_predicate(p: &mut dyn FnMut() -> bool, timeout: Duration) {
-        let start = Instant::now();
-        let decrement = Duration::from_millis(5);
-        loop {
-            if Instant::now() >= start + timeout {
-                break;
-            }
-
-            if p() {
-                return;
-            }
-
-            std::thread::sleep(decrement);
-        }
-        panic!("predicate did not evaluate to true within {:?}", timeout);
-    }
-
-    lazy_static! {
-        static ref PLAIN_ROOT: &'static Path = &Path::new("./plain_root");
-        static ref GPG_ROOT: &'static Path = &Path::new("./gpg_root");
-    }
-
-    fn test_roots(test_name: &str) -> (PathBuf, PathBuf) {
-        (PLAIN_ROOT.join(test_name), GPG_ROOT.join(test_name))
-    }
-
-    fn init_dir(p: &Path) -> anyhow::Result<()> {
-        if p.exists() {
-            std::fs::remove_dir_all(&p)?;
-        }
-        std::fs::create_dir_all(&p)?;
-
-        Ok(())
-    }
-
-    fn init_dirs(pr: &Path, gr: &Path) {
-        init_dir(pr);
-        init_dir(gr);
-    }
-
-    fn make_file(p: &Path, s: &[u8]) -> anyhow::Result<()> {
-        let mut f = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(p)?;
-        f.write_all(s)?;
-
-        assert!(p.exists());
-
-        Ok(())
-    }
-
-    fn make_encrypted_file(p: &Path, s: &[u8], passphrase: &str) -> anyhow::Result<()> {
-        let mut tmpfile = tempfile::NamedTempFile::new()?;
-        tmpfile.as_file().write_all(s)?;
-        crate::rewrite::fs_ops::encrypt_file(tmpfile.path(), p, passphrase)?;
-
-        Ok(())
-    }
-
     #[test]
     fn test_creation_failure() {
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
         // TODO one dir is inside the other
 
         // TODO dir doesn't exist
@@ -396,16 +338,17 @@ mod test {
 
     #[test]
     fn test_basic() -> anyhow::Result<()> {
-        let (pr, gr) = test_roots("test_basic");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
         // PD/notes.txt -> GD/notes.txt.gpg
         {
-            init_dirs(&pr, &gr);
-            make_file(&pr.join("notes.txt"), b"hello")?;
+            test_utils::init_dirs(&pr, &gr);
+            test_utils::make_file(&pr.join("notes.txt"), b"hello")?;
             let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
             gpgs.init()?;
 
-            poll_predicate(
+            test_utils::poll_predicate(
                 &mut || {
                     gpgs.try_process_events(std::time::Duration::from_millis(10))
                         .unwrap();
@@ -418,12 +361,12 @@ mod test {
 
         // GD/notes.txt.gpg -> PD/notes.txt
         {
-            init_dirs(&pr, &gr);
-            make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase")?;
+            test_utils::init_dirs(&pr, &gr);
+            test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase")?;
             let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
             gpgs.init()?;
 
-            poll_predicate(
+            test_utils::poll_predicate(
                 &mut || {
                     gpgs.try_process_events(std::time::Duration::from_millis(10))
                         .unwrap();
@@ -438,15 +381,17 @@ mod test {
 
     #[test]
     fn test_directories() -> anyhow::Result<()> {
-        let (pr, gr) = test_roots("test_directories");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
+
         // PD/dir/ -> GD/dir/
         {
-            init_dirs(&pr, &gr);
+            test_utils::init_dirs(&pr, &gr);
             std::fs::create_dir_all(&pr.join("dir"));
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init()?;
 
-            poll_predicate(
+            test_utils::poll_predicate(
                 &mut || {
                     gpgs.try_process_events(std::time::Duration::from_millis(10))
                         .unwrap();
@@ -459,12 +404,12 @@ mod test {
 
         // GD/dir/ -> PD/dir/
         {
-            init_dirs(&pr, &gr);
+            test_utils::init_dirs(&pr, &gr);
             std::fs::create_dir_all(&gr.join("dir"));
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init()?;
 
-            poll_predicate(
+            test_utils::poll_predicate(
                 &mut || {
                     gpgs.try_process_events(std::time::Duration::from_millis(10))
                         .unwrap();
@@ -477,16 +422,16 @@ mod test {
 
         // PD/dir/... -> GD/dir/...
         {
-            init_dirs(&pr, &gr);
+            test_utils::init_dirs(&pr, &gr);
             std::fs::create_dir_all(&pr.join("dir"));
-            make_file(&pr.join("dir").join("notes.txt"), b"hello")?;
+            test_utils::make_file(&pr.join("dir").join("notes.txt"), b"hello")?;
             std::fs::create_dir_all(&pr.join("dir").join("dir2"));
-            make_file(&pr.join("dir").join("dir2").join("notes2.txt"), b"hello2")?;
-            make_file(&pr.join("dir").join("dir2").join("notes3.txt"), b"hello3")?;
+            test_utils::make_file(&pr.join("dir").join("dir2").join("notes2.txt"), b"hello2")?;
+            test_utils::make_file(&pr.join("dir").join("dir2").join("notes3.txt"), b"hello3")?;
             let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
             gpgs.init()?;
 
-            poll_predicate(
+            test_utils::poll_predicate(
                 &mut || {
                     gpgs.try_process_events(std::time::Duration::from_millis(10))
                         .unwrap();
@@ -505,10 +450,12 @@ mod test {
     #[test]
     #[should_panic]
     fn test_wrong_passphrase() {
-        let (pr, gr) = test_roots("test_wrong_passphrase");
-        init_dirs(&pr, &gr);
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
-        make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase");
+        test_utils::init_dirs(&pr, &gr);
+
+        test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"hallo", "passphrase");
         let mut gpgs = GpgSync::new(&pr, &gr, "test_wrong_passphrase").unwrap();
         gpgs.init().unwrap();
     }
@@ -517,6 +464,8 @@ mod test {
     fn test_directory_deletion() {
         // TODO PLAIN_ROOT gets deleted
         // TODO GPG_ROOT gets deleted
+        //         let (pr, gr) =
+        test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
     }
 
     #[test]
@@ -525,21 +474,26 @@ mod test {
 
         // TODO panic when both are changed/added/modified and incompatible
         // TODO do nothing when both are changed/added/modified but the same
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
     }
 
     #[test]
     fn test_graceful_conflict() {
         // TODO Add plain + Del gpg -> pushplain
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
     }
 
     #[test]
     fn test_rename() -> anyhow::Result<()> {
         // TODO check failure when the target file exists
         // TODO check that moving from one directory into the other is not allowed
-        let (pr, gr) = test_roots("test_rename");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
-        init_dirs(&pr, &gr);
-        make_file(&pr.join("notes.txt"), b"hello");
+        test_utils::init_dirs(&pr, &gr);
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
         let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
         assert!(!gr.join("notes.txt.gpg").exists());
         gpgs.init()?;
@@ -549,7 +503,7 @@ mod test {
         std::fs::rename(pr.join("notes.txt"), pr.join("notes_renamed.txt"))?;
         assert!(!pr.join("notes.txt").exists() && pr.join("notes_renamed.txt").exists());
 
-        poll_predicate(
+        test_utils::poll_predicate(
             &mut || {
                 gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
@@ -566,15 +520,16 @@ mod test {
 
     #[test]
     fn test_running_sync() -> anyhow::Result<()> {
-        let (pr, gr) = test_roots("test_running_sync");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
-        init_dirs(&pr, &gr);
+        test_utils::init_dirs(&pr, &gr);
         let mut gpgs = GpgSync::new(&pr, &gr, "test")?;
 
         assert!(!gr.join("notes.txt.gpg").exists());
 
-        make_file(&pr.join("notes.txt"), b"hello");
-        poll_predicate(
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
+        test_utils::poll_predicate(
             &mut || {
                 gpgs.try_process_events(Duration::new(0, 200_000_000))
                     .unwrap();
@@ -590,20 +545,24 @@ mod test {
     #[test]
     fn test_database() {
         // TODO do some syncs, quit, modify plain, start again, and no conflict but pushplain should happen!
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
     }
 
     #[test]
     #[should_panic]
     fn test_changed_gpgroot() {
-        let (pr, gr) = test_roots("test_changed_gpgroot");
-        init_dirs(&pr, &gr);
-        make_file(&pr.join("notes.txt"), b"hello");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
+
+        test_utils::init_dirs(&pr, &gr);
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
         let gpgs = GpgSync::new(&pr, &gr, "test").unwrap();
         assert!(gr.join("notes.txt.gpg").exists());
         std::mem::drop(gpgs);
 
-        let (_, gr2) = test_roots("test_changed_gpgroot2");
-        init_dir(&gr2);
+        let (_, gr2) = test_utils::test_roots("test_changed_gpgroot2");
+        test_utils::init_dir(&gr2);
         // pr is already initialized to dir `pr`, trying to connect it to enc dir `gr2` shall fail
         let _gpgs = GpgSync::new(&pr, &gr2, "test").unwrap();
     }
@@ -615,17 +574,18 @@ mod test {
         // also even if their contents are the same, they are conflictcopied. At
         // least for the first run sha1 hashes of the contents should be
         // compared to not create conflicts.
-        let (pr, gr) = test_roots("test_conflictcopy_plain");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
-        init_dirs(&pr, &gr);
-        make_file(&pr.join("notes.txt"), b"hello");
-        make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
+        test_utils::init_dirs(&pr, &gr);
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
+        test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
 
         let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
         gpgs.init()?;
         gpgs.try_process_events(Duration::from_millis(10))?;
 
-        poll_predicate(
+        test_utils::poll_predicate(
             &mut || {
                 gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
@@ -643,16 +603,17 @@ mod test {
         // Test that a conflict copy is also synced back to the other side.
 
         // In the case plain-delete and enc-modified a ConflictCopyEnc is performed, so lets do that.
-        let (pr, gr) = test_roots("test_conflictcopy_enc");
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
 
-        init_dirs(&pr, &gr);
-        make_file(&pr.join("notes.txt"), b"hello");
+        test_utils::init_dirs(&pr, &gr);
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
 
         let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
         gpgs.init()?;
         gpgs.try_process_events(Duration::from_millis(10))?;
 
-        poll_predicate(
+        test_utils::poll_predicate(
             &mut || {
                 gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
@@ -663,9 +624,9 @@ mod test {
         );
 
         std::fs::remove_file(&pr.join("notes.txt"))?;
-        make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
+        test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"goodbye", "passphrase")?;
 
-        poll_predicate(
+        test_utils::poll_predicate(
             &mut || {
                 gpgs.try_process_events(Duration::from_millis(200)).unwrap();
 
