@@ -186,10 +186,11 @@ mod test {
             root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t0, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode::new_file(t0,Some(Dirt::Modified)),
-                        String::from("f1.txt.gpg") => TreeNode::new_file(t0, Some(Dirt::Modified))
+                    t0, Some(Dirt::PathDirt),None, hashmap![
+                        conflict_filename.clone() => TreeNode::new_file(t0,Some(Dirt::Modified),None),
+                        String::from("f1.txt.gpg") => TreeNode::new_file(t0, Some(Dirt::Modified),None)
                     ])
                 ],
             ),
@@ -237,10 +238,11 @@ mod test {
             root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t1, Some(Dirt::PathDirt), hashmap![
-                        conflict_filename.clone() => TreeNode::new_file(t1,Some(Dirt::Modified)),
-                        String::from("f1.txt") => TreeNode::new_file(t1, Some(Dirt::Modified))
+                    t1, Some(Dirt::PathDirt),None, hashmap![
+                        conflict_filename.clone() => TreeNode::new_file(t1,Some(Dirt::Modified),None),
+                        String::from("f1.txt") => TreeNode::new_file(t1, Some(Dirt::Modified),None)
                     ])
                 ],
             ),
@@ -277,8 +279,9 @@ mod test {
             root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t0, Some(Dirt::PathDirt), hashmap![])
+                    t0, Some(Dirt::PathDirt),None, hashmap![])
                 ],
             ),
         };
@@ -312,8 +315,9 @@ mod test {
             root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t1, Some(Dirt::PathDirt), hashmap![]
+                    t1, Some(Dirt::PathDirt),None, hashmap![]
                     )
                 ],
             ),
@@ -348,9 +352,10 @@ mod test {
             root: TreeNode::new_dir(
                 t1,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t1, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt.gpg") => TreeNode::new_file(t1, Some(Dirt::Modified))
+                    t1, Some(Dirt::PathDirt),None, hashmap![
+                        String::from("f1.txt.gpg") => TreeNode::new_file(t1, Some(Dirt::Modified),None)
                     ])
                 ],
             ),
@@ -385,9 +390,10 @@ mod test {
             root: TreeNode::new_dir(
                 t0,
                 Some(Dirt::PathDirt),
+                None,
                 hashmap![String::from("a") => TreeNode::new_dir(
-                    t0, Some(Dirt::PathDirt), hashmap![
-                        String::from("f1.txt") => TreeNode::new_file(t0, Some(Dirt::Modified))
+                    t0, Some(Dirt::PathDirt),None, hashmap![
+                        String::from("f1.txt") => TreeNode::new_file(t0, Some(Dirt::Modified),None)
                     ])
                 ],
             ),

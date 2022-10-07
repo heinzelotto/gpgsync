@@ -26,6 +26,7 @@ pub enum Dirt {
 pub struct TreeNode {
     pub mtime: std::time::SystemTime, // TODO ?is this even needed
     pub dirt: Option<Dirt>,
+    pub hash: Option<Vec<u8>>,
     /// The keys are the path segment names as on the disk. I. e. for the
     /// encrypted tree there is a .gpg suffix on files.
     pub children: Option<std::collections::HashMap<String, TreeNode>>,
@@ -35,11 +36,13 @@ impl TreeNode {
     pub fn new_dir(
         mtime: std::time::SystemTime, // TODO ?is this even needed
         dirt: Option<Dirt>,
+        hash: Option<Vec<u8>>,
         children: std::collections::HashMap<String, TreeNode>,
     ) -> Self {
         TreeNode {
             mtime,
             dirt,
+            hash,
             children: Some(children),
         }
     }
@@ -47,10 +50,12 @@ impl TreeNode {
     pub fn new_file(
         mtime: std::time::SystemTime, // TODO ?is this even needed
         dirt: Option<Dirt>,
+        hash: Option<Vec<u8>>,
     ) -> Self {
         TreeNode {
             mtime,
             dirt,
+            hash,
             children: None,
         }
     }
@@ -248,6 +253,7 @@ impl Tree {
             root: TreeNode::new_dir(
                 std::time::SystemTime::now(),
                 None,
+                None,
                 std::collections::HashMap::new(),
             ),
         }
@@ -255,7 +261,7 @@ impl Tree {
 
     pub fn with_time(time: &std::time::SystemTime) -> Self {
         Self {
-            root: TreeNode::new_dir(time.clone(), None, std::collections::HashMap::new()),
+            root: TreeNode::new_dir(time.clone(), None, None, std::collections::HashMap::new()),
         }
     }
 
@@ -290,6 +296,7 @@ impl Tree {
                 .or_insert(TreeNode::new_dir(
                     mtime,
                     Some(Dirt::PathDirt),
+                    None,
                     std::collections::HashMap::new(),
                 ));
 

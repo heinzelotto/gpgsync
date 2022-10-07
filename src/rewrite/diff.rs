@@ -306,8 +306,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt") => TreeNode::new_file(
-                        f1_mtime, Some(Dirt::Modified)
+                        f1_mtime, Some(Dirt::Modified),None
                     )]
                 )
             })
@@ -346,8 +347,9 @@ mod test {
                 root: TreeNode::new_dir(
                     t1,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt") => TreeNode::new_file(
-                        t1, Some(Dirt::Deleted)
+                        t1, Some(Dirt::Deleted),None
                     )]
                 )
             }
@@ -390,8 +392,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt") => TreeNode::new_file(
-                        f1_mtime, Some(Dirt::Modified)
+                        f1_mtime, Some(Dirt::Modified),None
                     )]
                 )
             }
@@ -434,8 +437,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     None,
+                    None,
                     hashmap![String::from("f1.txt") => TreeNode::new_file(
-                        f1_mtime, None
+                        f1_mtime, None,None
                     )]
                 )
             }
@@ -477,8 +481,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
-                        f1_mtime, Some(Dirt::Modified)
+                        f1_mtime, Some(Dirt::Modified),None
                     )]
                 )
             }
@@ -517,8 +522,9 @@ mod test {
                 root: TreeNode::new_dir(
                     t1,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
-                        t1, Some(Dirt::Deleted)
+                        t1, Some(Dirt::Deleted),None
                     )]
                 )
             }
@@ -561,8 +567,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     Some(Dirt::PathDirt),
+                    None,
                     hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
-                        f1_mtime, Some(Dirt::Modified)
+                        f1_mtime, Some(Dirt::Modified),None
                     )]
                 )
             }
@@ -605,8 +612,9 @@ mod test {
                 root: TreeNode::new_dir(
                     f1_mtime,
                     None,
+                    None,
                     hashmap![String::from("f1.txt.gpg") => TreeNode::new_file(
-                        f1_mtime, None
+                        f1_mtime, None,None
                     )]
                 )
             }
@@ -644,7 +652,7 @@ mod test {
         assert_eq!(
             dbg!(tr),
             dbg!(Tree {
-                root: TreeNode::new_dir(t0, None, hashmap![])
+                root: TreeNode::new_dir(t0, None, None, hashmap![])
             })
         );
 

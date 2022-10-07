@@ -252,12 +252,21 @@ fn calculate_merge_rec(
                         ops.push(FileOperation::EncryptPlain(newpathe));
                     }
                     (Some(Dirt::Modified), Some(Dirt::Modified)) => {
-                        // conflictcopy plain, decrypt enc
-                        ops.push(FileOperation::ConflictCopyPlain(
-                            newpathp.clone(),
-                            newconflictcopypathp,
-                        ));
-                        ops.push(FileOperation::DecryptEnc(newpathe));
+                        match (&ne.hash, &np.hash) {
+                            (Some(h1), Some(h2)) if h1 == h2 => {
+                                // if both have hashes and they are equal, we do not queue a conflict
+                            }
+                            _ => {
+                                // conflictcopy plain, decrypt enc
+                                ops.push(FileOperation::ConflictCopyPlain(
+                                    newpathp.clone(),
+                                    newconflictcopypathp,
+                                ));
+                                ops.push(FileOperation::DecryptEnc(newpathe));
+                            }
+                        };
+
+                        //if ne.hash.is_none() || np.hash.is_none() || ne.hash.unwrap() {
                     }
                     (Some(Dirt::Modified), Some(Dirt::Deleted)) => {
                         // conflictcopy the modified one and delete the original
@@ -742,6 +751,72 @@ mod test {
                     t0.duration_since(t0)?.as_secs()
                 ))),
             ]
+        );
+
+        Ok(())
+    }
+    #[test]
+    fn nodes_with_hashes() -> anyhow::Result<()> {
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+
+        let h1 = vec![1u8, 1u8, 1u8];
+        let h2 = vec![2u8, 3u8, 4u8, 5u8];
+
+        let mut tree_e = Tree::new();
+        tree_e.write(&Path::new("same_hash.txt.gpg"), false, t0);
+        tree_e.get(&Path::new("same_hash.txt.gpg")).unwrap().hash = Some(h1.clone());
+        tree_e.write(&Path::new("different_hash.txt.gpg"), false, t0);
+        tree_e
+            .get(&Path::new("different_hash.txt.gpg"))
+            .unwrap()
+            .hash = Some(h1.clone());
+        tree_e.write(&Path::new("only_enc_has_a_hash.txt.gpg"), false, t0);
+        tree_e
+            .get(&Path::new("only_enc_has_a_hash.txt.gpg"))
+            .unwrap()
+            .hash = Some(h1.clone());
+        dbg!(&tree_e);
+
+        let mut tree_p = Tree::new();
+        tree_p.write(&Path::new("same_hash.txt"), false, t0);
+        tree_p.get(&Path::new("same_hash.txt")).unwrap().hash = Some(h1.clone());
+        tree_p.write(&Path::new("different_hash.txt"), false, t0);
+        tree_p.get(&Path::new("different_hash.txt")).unwrap().hash = Some(h2.clone());
+        tree_p.write(&Path::new("only_enc_has_a_hash.txt"), false, t0);
+        tree_p
+            .get(&Path::new("only_enc_has_a_hash.txt"))
+            .unwrap()
+            .hash = None;
+        dbg!(&tree_p);
+
+        assert_eq!(
+            dbg!(calculate_merge(&tree_e, &tree_p)),
+            dbg!(vec![
+                FileOperation::ConflictCopyPlain(
+                    PathBuf::from("different_hash.txt"),
+                    PathBuf::from(format!(
+                        "conflict_{}_different_hash.txt",
+                        t0.duration_since(t0)?.as_secs()
+                    ))
+                ),
+                FileOperation::DecryptEnc(PathBuf::from("different_hash.txt.gpg")),
+                FileOperation::ConflictCopyPlain(
+                    PathBuf::from("only_enc_has_a_hash.txt"),
+                    PathBuf::from(format!(
+                        "conflict_{}_only_enc_has_a_hash.txt",
+                        t0.duration_since(t0)?.as_secs()
+                    ))
+                ),
+                FileOperation::DecryptEnc(PathBuf::from("only_enc_has_a_hash.txt.gpg")),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "conflict_{}_different_hash.txt",
+                    t0.duration_since(t0)?.as_secs()
+                ))),
+                FileOperation::EncryptPlain(PathBuf::from(format!(
+                    "conflict_{}_only_enc_has_a_hash.txt",
+                    t0.duration_since(t0)?.as_secs()
+                ))),
+            ])
         );
 
         Ok(())

@@ -112,7 +112,6 @@ impl GpgSync {
             std::path::Path::new(""),
             diff::TreeType::Plain,
         );
-
         diff::TreeReconciler::diff_from_filesystem(
             &self.enc_root,
             &mut self.enc_tree,
@@ -120,8 +119,44 @@ impl GpgSync {
             diff::TreeType::Encrypted,
         );
 
+        // for the initial read, equip the tree with hashes of the files' contents
+        // borrowck will complain if bound inside the closure
+        let pr = &self.plain_root;
+        let passphrase = &self.passphrase;
+        let gr = &self.enc_root;
+        self.plain_tree.root.dfs_preorder_path_mut(&mut |n, p| {
+            if n.children.is_none() {
+                n.hash = Some(fs_utils::plain_file_hash(&pr.join(p)).unwrap());
+            }
+            true
+        });
+        self.enc_tree.root.dfs_preorder_path_mut(&mut |n, p| {
+            if n.children.is_none() {
+                n.hash = Some(fs_utils::gpg_file_hash(&gr.join(p), passphrase).unwrap());
+            }
+            true
+        });
+
         // perform initial sync
         self.try_process_events(std::time::Duration::from_millis(10))?;
+
+        // remove all hashes again
+        self.plain_tree.root.dfs_preorder_path_mut(
+            &mut |n: &mut tree::TreeNode, p: &std::path::Path| {
+                if n.children.is_none() {
+                    n.hash = None;
+                }
+                true
+            },
+        );
+        self.enc_tree.root.dfs_preorder_path_mut(
+            &mut |n: &mut tree::TreeNode, p: &std::path::Path| {
+                if n.children.is_none() {
+                    n.hash = None;
+                }
+                true
+            },
+        );
 
         Ok(())
     }
@@ -580,7 +615,6 @@ mod test {
 
         let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
         gpgs.init()?;
-        gpgs.try_process_events(Duration::from_millis(10))?;
 
         test_utils::poll_predicate(
             &mut || {
@@ -695,4 +729,42 @@ mod test {
 
     //     Ok(())
     // }
+
+    #[test]
+    fn initial_sync_regards_file_contents() -> anyhow::Result<()> {
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
+        test_utils::init_dirs(&pr, &gr);
+
+        let mut gpgs = GpgSync::new(&pr, &gr, "passphrase")?;
+
+        // initial sync does not produce fileops if contents agree
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
+        test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"hello", "passphrase")?;
+        gpgs.init()?;
+        test_utils::poll_predicate(
+            &mut || {
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 1
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 1
+            },
+            Duration::from_millis(500),
+        );
+
+        // subsequent sync create conflictcopies even if the file contents agree
+        std::fs::remove_file(&pr.join("notes.txt"))?;
+        test_utils::make_file(&pr.join("notes.txt"), b"hello");
+        std::fs::remove_file(&gr.join("notes.txt.gpg"))?;
+        test_utils::make_encrypted_file(&gr.join("notes.txt.gpg"), b"hello", "passphrase")?;
+        test_utils::poll_predicate(
+            &mut || {
+                gpgs.try_process_events(Duration::from_millis(10)).unwrap();
+
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 2
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 2
+            },
+            Duration::from_millis(500),
+        );
+
+        Ok(())
+    }
 }
