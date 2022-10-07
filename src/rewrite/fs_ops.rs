@@ -223,6 +223,37 @@ pub fn perform_file_ops(
 }
 
 // TODO write tests
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::rewrite::diff::FileOperation;
+    use crate::rewrite::test_utils;
+
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn empty_directory_can_be_encrypted() -> anyhow::Result<()> {
+        let (pr, gr) =
+            test_utils::test_roots(test_utils::function_name!().rsplit_once(':').unwrap().1);
+
+        test_utils::init_dirs(&pr, &gr);
+        std::fs::create_dir_all(dbg!(&pr.join("empty_dir")))?;
+
+        let fs_ops = vec![FileOperation::EncryptPlain(PathBuf::from("empty_dir"))];
+        perform_file_ops(&fs_ops, &pr, &gr, "passphrase")?;
+
+        test_utils::poll_predicate(
+            &mut || {
+                dbg!(std::fs::read_dir(&pr).unwrap().count()) == 1
+                    && dbg!(std::fs::read_dir(&gr).unwrap().count()) == 1
+            },
+            Duration::from_millis(500),
+        );
+
+        Ok(())
+    }
+}
 
 // target is overwritten by DecryptEnc EncryptPlain
 

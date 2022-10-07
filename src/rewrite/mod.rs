@@ -42,9 +42,6 @@ mod update;
 // TODO test where a/b.txt.gpg is deleted and then instantly after a/b.txt/
 // is created (i. e. it is file replaced by dir)
 
-// TODO: ?will a FileOperation::Encryption() work with a directory where nothing
-// needs to be encrypted
-
 /// The GPGsync instance.
 pub struct GpgSync {
     /// The sync database is persisted in the `plain_root` across program runs.
