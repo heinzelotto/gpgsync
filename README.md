@@ -10,14 +10,15 @@ One example where this tool is very useful is when you use a cloud sync service 
 
 Current and planned features:
 
-- [X] Bidirectional sync between two directories, one unencrypted, one encrypted.
-- [X] Encryption of file contents. File names are not encrypted.
+- [X] Bidirectional recursive sync between two directories, one unencrypted, one encrypted.
+- [X] Encryption of file contents.
 - [X] A single passphrase for all files.
 - [X] Continuously watch the directories and sync when files are modified.
-- [X] Maintain a persistent database of file metadata to detect file modifications that happened since the program last ran. 
-- [X] All hidden files are ignored (= files starting with a '.').
-- [X] Ignore `*.gpg` files in the plain dir, ignore non-`*.gpg` files in the gpg dir.
-- [X] Correctly handle renamed files.
+- [X] Conflict handling for all kinds of incompatible modifications/deletions on the two sides.
+- [ ] Maintain a persistent database of file metadata to detect file modifications that happened since the program last ran. 
+- [ ] All hidden files are ignored (= files starting with a '.').
+- [ ] Ignore `*.gpg` files in the plain dir, ignore non-`*.gpg` files in the gpg dir.
+- [ ] Correctly handle renamed files.
 - [ ] Respect a .gitignore in the plain directory.
 - [ ] Graceful handling of errors, wrong passphrase, and sync conflicts (currently the program just exits).
 - [ ] More tests.
@@ -26,6 +27,7 @@ Current and planned features:
 Non-features:
 
 - A database containing all file revisions is not planned. Init a git repository in your plain dir if you wish to achieve this.
+- File names are not encrypted.
 
 # Caveats
 
@@ -46,3 +48,28 @@ GPGsync depends on [gpgme](https://www.gnupg.org/software/gpgme/index.html), so 
 Currently there are no packaged pre-built binaries available, so you will have to build it from source yourself using `cargo build --release` in the code directory.  You can then copy the binary from `target/release/gpgsync` to a location of your liking.
 
 To run, just use `gpgsync path/to/plain_dir path/to/encrypted_dir passphrase`.
+
+# Architecture
+The following components are involved in GPGSync
+
+``` mermaid
+graph LR
+    subgraph gpgsync
+    A[GpgSync]
+    B[FS Watcher]
+    C[(FS Representations enc+plain)]
+    E[FS Differ]
+    F[Merger for enc+plain trees]
+    end
+    D[(FileSystem, enc+plain)]
+
+    A --- B
+    A --- C
+    A --- E
+    A --- F
+    F --- C
+    E --- |reads changes| D
+    A ---|write modifications| D
+    B --- |listen for modifications| D
+    E --- C
+```
